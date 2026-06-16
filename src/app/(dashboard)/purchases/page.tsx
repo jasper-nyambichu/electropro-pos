@@ -1,3 +1,4 @@
+import Image from "next/image";
 import StatBanner from "@/components/ui/StatBanner";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import PanelCard from "@/components/ui/PanelCard";
@@ -166,7 +167,7 @@ export default function PurchasesPage() {
             {SUPPLIERS.map((s) => (
               <div key={s.name} className="flex items-center justify-between group cursor-pointer hover:bg-surface transition-colors p-1 rounded">
                 <div className="flex items-center gap-2">
-                  <img alt={s.name} className="w-8 h-8 rounded" src={s.img} />
+                  <Image alt={s.name} src={s.img} width={32} height={32} className="rounded object-cover" />
                   <div>
                     <p className="text-body-semibold text-on-surface">{s.name}</p>
                     <p className="text-[11px] text-secondary">{s.email}</p>

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import PanelCard from "@/components/ui/PanelCard";
 import Pagination from "@/components/ui/Pagination";
@@ -43,9 +44,9 @@ export default function LowStockPage() {
       header: "Product",
       render: (item) => (
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-surface-container flex items-center justify-center rounded overflow-hidden border border-outline-variant/10 flex-shrink-0">
+          <div className="w-10 h-10 bg-surface-container flex items-center justify-center rounded overflow-hidden border border-outline-variant/10 flex-shrink-0 relative">
             {item.imageSrc ? (
-              <img src={item.imageSrc} alt={item.name} className="w-full h-full object-cover" />
+              <Image src={item.imageSrc} alt={item.name} fill sizes="40px" className="object-cover rounded" />
             ) : (
               <span className="material-symbols-outlined text-secondary text-[20px]">inventory_2</span>
             )}
