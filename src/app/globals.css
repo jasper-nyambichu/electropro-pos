@@ -14,6 +14,28 @@
   border-left: 3px solid #b32200;
 }
 
+/* Sidebar transition helpers */
+.sidebar-open-overlay {
+  pointer-events: auto;
+  opacity: 1;
+}
+.sidebar-closed-overlay {
+  pointer-events: none;
+  opacity: 0;
+}
+
+.status-pill {
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.small-box-footer {
+  background: rgba(0, 0, 0, 0.1);
+}
+
 .dashboard-tile::after {
   content: "";
   position: absolute;
