@@ -1,18 +1,42 @@
+// src/app/(dashboard)/customers/add/page.tsx
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { customersApi, ApiError } from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 
 export default function AddCustomerPage() {
+  const toast = useToast();
+  const router = useRouter();
   const [saving, setSaving] = useState(false);
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+
+    const fullName = String(formData.get("fullName") ?? "").trim();
+    const [firstname, ...rest] = fullName.split(" ");
+    const lastname = rest.join(" ") || firstname; // fallback if only one name given
+
+    const phone = String(formData.get("phone") ?? "").trim() || undefined;
+    const email = String(formData.get("email") ?? "").trim() || undefined;
+    const address = String(formData.get("address") ?? "").trim() || undefined;
+
+    if (!firstname) return;
+
     setSaving(true);
-    setTimeout(() => {
-      alert("Customer saved successfully!");
+    try {
+      await customersApi.create({ firstname, lastname, email, phone, address });
+      toast.success(`Customer "${fullName}" saved.`);
+      form.reset();
+      router.push("/customers");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not save customer.");
+    } finally {
       setSaving(false);
-      e.currentTarget.reset();
-    }, 1000);
+    }
   }
 
   return (
@@ -48,6 +72,7 @@ export default function AddCustomerPage() {
                 Full Name *
               </label>
               <input
+                name="fullName"
                 className="w-full h-10 px-3 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm transition-all"
                 placeholder="John Doe or Acme Corp"
                 required
@@ -58,6 +83,7 @@ export default function AddCustomerPage() {
               <label className="block font-body-semibold text-label-sm mb-1 text-on-surface-variant">
                 Customer Type
               </label>
+              {/* Not yet in CustomerDto — collected for future use */}
               <select className="w-full h-10 px-3 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm appearance-none">
                 <option value="individual">Individual</option>
                 <option value="organization">Organization</option>
@@ -68,6 +94,7 @@ export default function AddCustomerPage() {
                 Phone Number
               </label>
               <input
+                name="phone"
                 className="w-full h-10 px-3 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm"
                 placeholder="+254 700 000 000"
                 type="tel"
@@ -78,6 +105,7 @@ export default function AddCustomerPage() {
                 Email Address
               </label>
               <input
+                name="email"
                 className="w-full h-10 px-3 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm"
                 placeholder="customer@example.com"
                 type="email"
@@ -88,6 +116,7 @@ export default function AddCustomerPage() {
                 Shipping/Billing Address
               </label>
               <textarea
+                name="address"
                 className="w-full px-3 py-2 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm resize-none"
                 placeholder="123 Commerce St, Suite 100..."
                 rows={3}
@@ -97,6 +126,7 @@ export default function AddCustomerPage() {
               <label className="block font-body-semibold text-label-sm mb-1 text-on-surface-variant">
                 Internal Notes
               </label>
+              {/* Not yet in CustomerDto — collected for future use */}
               <textarea
                 className="w-full px-3 py-2 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm resize-none"
                 placeholder="Preferred shipping methods, credit terms, etc."
@@ -107,6 +137,7 @@ export default function AddCustomerPage() {
               <button
                 className="px-6 h-10 font-body-semibold text-label-sm text-secondary bg-surface-container-high hover:bg-surface-variant border border-outline-variant rounded-sm transition-colors"
                 type="button"
+                onClick={() => router.push("/customers")}
               >
                 Cancel
               </button>

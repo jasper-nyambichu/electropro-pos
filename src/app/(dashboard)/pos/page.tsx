@@ -1,64 +1,97 @@
+// src/app/(dashboard)/pos/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import {
+  categoriesApi,
+  productsApi,
+  salesApi,
+  ApiError,
+  CategoryResponseDto,
+  ProductResponseDto,
+} from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 
-interface Product {
-  id: number;
-  name: string;
-  price: number;
-  qty: number;
-  category: string;
-  image?: string;
-  icon?: string;
-}
-
-interface CartItem extends Product {
+interface CartItem {
+  product: ProductResponseDto;
   cartQty: number;
 }
 
-const CATEGORIES = ["All Products", "TVs", "PA Systems", "Audio", "Power", "Accessories"];
-
-const PRODUCTS: Product[] = [
-  { id: 1, name: 'Samsung 55" UHD Smart TV', price: 78000, qty: 8, category: "TVs", image: "https://lh3.googleusercontent.com/aida-public/AB6AXuCJNHX1Ax3zh1Xo8xR58d1bpA7xXsnnFRBpddIiqNRgh2tyA3dAQ1TCItlmR__7ds8pZwvF2rW3ACpAbb9mBXqM0Yt2xQqsQ3FbaZ-kWlOg-sZ3oLDck3qeaRDibyzsuo7tsmgKzLT2vluNj150bLHti5uziRqZUh8mTBuXnVkyazoT2t4qWcp_mRQQmzvm068Z9eMLydeijzB7s5dBmy85D_3iwoRBij1Ud6bh2wwC9jn0QsyXvAPPjuP72pyvuK5xv5PW3Rs3wybz" },
-  { id: 2, name: "Yamaha DBR12 Powered Spk", price: 55000, qty: 3, category: "PA Systems", image: "https://lh3.googleusercontent.com/aida-public/AB6AXuAHo6LIf_401njxx0bxxLFBFynyOtkbEnzlJIYzLcvDOHpTFJDoEdDmuXYgyNmyYLL7DL9qtxH-HOAc9JF_rR0nWDu9XyuxGEMiN6TvUacXsYLxIdpmmT16Cjda6GZ6EQELt4fVztMy6-tLEuthw9O5kURfX6WaUgcQWiuWO0AzJQXuPN_NCXxFxj_K8yHjH7eR-L0_6u4nYqfH89e7joi3O0-Ay74p1ZCD6G9RVt11aQ-cjdqYyMemq5yKWgui1rs0NyEgbtroFJEq" },
-  { id: 3, name: "Sony WH-1000XM4", price: 35000, qty: 24, category: "Audio", image: "https://lh3.googleusercontent.com/aida-public/AB6AXuD8C1e5MlHyy8yMM5HO-7RtLieyFzu0-2ouOM1OTfzrinei6Q3saNRElvQd0hj1Z3QbtN47mH1qn_c3wfuYhY2_BTkEqV4pc9VnmdRHz-Qnb28cW8bfXvUJc1bRlRORDQs1cZeuWnq6I1KzG_bqxpkHNB5VQnxKEgHSO0SaFRdcmYDbvEpA9rT_GLrG6ChSj_MK1rhnRrWB5h3aOcWJNYZ59wQQTQyyBscuXG-E6sISRYNkmnPuSSSgx5RVRek_xg8Zp8ohOEfg2twL" },
-  { id: 4, name: "APC 1.5KVA Smart UPS", price: 22500, qty: 2, category: "Power", icon: "battery_charging_full" },
-  { id: 5, name: 'LG 43" Smart LED TV', price: 45000, qty: 12, category: "TVs", icon: "tv" },
-  { id: 6, name: "Shure SM58 Mic", price: 12500, qty: 15, category: "PA Systems", icon: "mic" },
-  { id: 7, name: "Soundcraft EFX8 Mixer", price: 42000, qty: 2, category: "PA Systems", icon: "settings_input_component" },
-  { id: 8, name: "HDMI Cable 10M Gold", price: 1800, qty: 45, category: "Accessories", icon: "settings_input_hdmi" },
-  { id: 9, name: 'Wall Mount 32-65"', price: 3500, qty: 18, category: "Accessories", icon: "settings_overscan" },
-  { id: 10, name: "Logitech MK270 Combo", price: 4200, qty: 30, category: "Accessories", icon: "keyboard" },
-  { id: 11, name: "JBL PartyBox 310", price: 68000, qty: 4, category: "Audio", icon: "speaker" },
-  { id: 12, name: "Epson L3210 EcoTank", price: 28000, qty: 6, category: "Accessories", icon: "print" },
-];
-
 export default function POSPage() {
+  const toast = useToast();
+  const [products, setProducts] = useState<ProductResponseDto[]>([]);
+  const [categories, setCategories] = useState<CategoryResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [activeCategory, setActiveCategory] = useState("All Products");
+  const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "MPESA" | "CREDIT">("CASH");
+  const [checkingOut, setCheckingOut] = useState(false);
 
-  const filtered = activeCategory === "All Products"
-    ? PRODUCTS
-    : PRODUCTS.filter((p) => p.category === activeCategory);
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const [p, c] = await Promise.all([productsApi.list(), categoriesApi.list()]);
+      setProducts(p);
+      setCategories(c);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load products.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  function addToCart(product: Product) {
+  useEffect(() => {
+    load();
+  }, []);
+
+  const categoryTabs = ["All Products", ...categories.map((c) => c.name)];
+
+  const filtered = useMemo(() => {
+    let list = products;
+    if (activeCategory !== "All Products") {
+      list = list.filter((p) => p.categoryName === activeCategory);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.sku?.toLowerCase().includes(q) ||
+          p.barcode?.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [products, activeCategory, search]);
+
+  function addToCart(product: ProductResponseDto) {
+    if (product.quantity <= 0) {
+      toast.error(`${product.name} is out of stock.`);
+      return;
+    }
     setCart((prev) => {
-      const existing = prev.find((c) => c.id === product.id);
+      const existing = prev.find((c) => c.product.id === product.id);
       if (existing) {
+        if (existing.cartQty >= product.quantity) {
+          toast.error(`Only ${product.quantity} of ${product.name} in stock.`);
+          return prev;
+        }
         return prev.map((c) =>
-          c.id === product.id ? { ...c, cartQty: c.cartQty + 1 } : c
+          c.product.id === product.id ? { ...c, cartQty: c.cartQty + 1 } : c
         );
       }
-      return [...prev, { ...product, cartQty: 1 }];
+      return [...prev, { product, cartQty: 1 }];
     });
   }
 
   function updateQty(id: number, delta: number) {
     setCart((prev) =>
       prev
-        .map((c) => (c.id === id ? { ...c, cartQty: c.cartQty + delta } : c))
+        .map((c) => (c.product.id === id ? { ...c, cartQty: c.cartQty + delta } : c))
         .filter((c) => c.cartQty > 0)
     );
   }
@@ -67,9 +100,34 @@ export default function POSPage() {
     setCart([]);
   }
 
-  const subtotal = cart.reduce((s, c) => s + c.price * c.cartQty, 0);
+  const subtotal = cart.reduce((s, c) => s + c.product.price * c.cartQty, 0);
   const vat = Math.round(subtotal * 0.16);
   const total = subtotal + vat;
+
+  async function completeSale() {
+    if (cart.length === 0) {
+      toast.error("Cart is empty.");
+      return;
+    }
+    setCheckingOut(true);
+    try {
+      const sale = await salesApi.create({ paymentMethod });
+      for (const item of cart) {
+        await salesApi.addItem({
+          saleId: sale.id,
+          productId: item.product.id,
+          quantity: item.cartQty,
+        });
+      }
+      toast.success(`Sale completed. Receipt ${sale.receiptNumber}.`);
+      clearCart();
+      await load(); // refresh stock levels
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not complete sale.");
+    } finally {
+      setCheckingOut(false);
+    }
+  }
 
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-90px)] gap-0 -mx-5 -mt-5">
@@ -83,11 +141,13 @@ export default function POSPage() {
               className="flex-1 bg-transparent border-none focus:ring-0 font-body-reg py-2 px-3"
               placeholder="Scan barcode or search product name..."
               type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
           {/* Category filters */}
           <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map((cat) => (
+            {categoryTabs.map((cat) => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
@@ -103,47 +163,63 @@ export default function POSPage() {
           </div>
         </div>
 
+        {error && (
+          <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm mb-4">
+            {error}
+          </div>
+        )}
+
         {/* Product Grid */}
-        <div className="product-grid">
-          {filtered.map((product) => (
-            <div
-              key={product.id}
-              onClick={() => addToCart(product)}
-              className="bg-white border border-outline-variant/30 rounded shadow-sm overflow-hidden cursor-pointer hover:border-primary transition-colors group"
-            >
-              <div className="h-32 bg-surface-container relative overflow-hidden">
-                {product.image ? (
-                  <Image
-                    src={product.image}
-                    alt={product.name}
-                    fill
-                    sizes="160px"
-                    className="object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-secondary-container">
-                    <span className="material-symbols-outlined text-[48px] text-outline-variant/40 group-hover:text-primary/20 transition-colors">
-                      {product.icon}
-                    </span>
+        {loading ? (
+          <p className="p-6 text-center text-secondary">Loading products…</p>
+        ) : filtered.length === 0 ? (
+          <div className="border-2 border-dashed border-outline-variant/30 rounded-lg p-8 flex flex-col items-center justify-center text-secondary opacity-60">
+            <p className="font-body-semibold">No products found</p>
+          </div>
+        ) : (
+          <div className="product-grid">
+            {filtered.map((product) => (
+              <div
+                key={product.id}
+                onClick={() => addToCart(product)}
+                className="bg-white border border-outline-variant/30 rounded shadow-sm overflow-hidden cursor-pointer hover:border-primary transition-colors group"
+              >
+                <div className="h-32 bg-surface-container relative overflow-hidden">
+                  {product.imageUrl ? (
+                    <Image
+                      src={product.imageUrl}
+                      alt={product.name}
+                      fill
+                      sizes="160px"
+                      className="object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-secondary-container">
+                      <span className="material-symbols-outlined text-[48px] text-outline-variant/40 group-hover:text-primary/20 transition-colors">
+                        inventory_2
+                      </span>
+                    </div>
+                  )}
+                  <div
+                    className={`absolute top-2 right-2 text-white text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                      product.quantity <= product.lowStockThreshold ? "bg-error" : "bg-on-primary-fixed-variant"
+                    }`}
+                  >
+                    {product.quantity <= product.lowStockThreshold
+                      ? "Low Stock"
+                      : `Qty: ${product.quantity}`}
                   </div>
-                )}
-                <div
-                  className={`absolute top-2 right-2 text-white text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                    product.qty <= 3 ? "bg-error" : "bg-on-primary-fixed-variant"
-                  }`}
-                >
-                  {product.qty <= 3 ? "Low Stock" : `Qty: ${product.qty}`}
+                </div>
+                <div className="p-2">
+                  <h3 className="font-body-semibold text-[13px] leading-tight mb-1">{product.name}</h3>
+                  <div className="text-primary font-bold text-[14px]">
+                    KES {product.price.toLocaleString()}
+                  </div>
                 </div>
               </div>
-              <div className="p-2">
-                <h3 className="font-body-semibold text-[13px] leading-tight mb-1">{product.name}</h3>
-                <div className="text-primary font-bold text-[14px]">
-                  KES {product.price.toLocaleString()}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Right: Cart */}
@@ -152,7 +228,9 @@ export default function POSPage() {
         <div className="p-4 border-b border-surface-variant flex justify-between items-center bg-surface-container-low">
           <div>
             <h2 className="font-panel-header text-panel-header">Current Sale</h2>
-            <p className="text-label-sm text-secondary">Ticket #202405-182</p>
+            <p className="text-label-sm text-secondary">
+              {cart.length} item{cart.length === 1 ? "" : "s"} in cart
+            </p>
           </div>
           <button
             onClick={clearCart}
@@ -174,21 +252,21 @@ export default function POSPage() {
           ) : (
             cart.map((item) => (
               <div
-                key={item.id}
+                key={item.product.id}
                 className="bg-surface-bright border border-outline-variant/20 p-3 rounded flex flex-col gap-2"
               >
                 <div className="flex justify-between items-start">
                   <span className="font-body-semibold text-[13px] text-on-surface flex-1 pr-2">
-                    {item.name}
+                    {item.product.name}
                   </span>
                   <span className="font-body-semibold text-on-surface text-[13px]">
-                    {(item.price * item.cartQty).toLocaleString()}
+                    {(item.product.price * item.cartQty).toLocaleString()}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => updateQty(item.id, -1)}
+                      onClick={() => updateQty(item.product.id, -1)}
                       className="w-6 h-6 flex items-center justify-center bg-surface-container rounded border border-outline-variant/30 hover:bg-error-container hover:text-error transition-colors"
                     >
                       -
@@ -197,14 +275,14 @@ export default function POSPage() {
                       {item.cartQty}
                     </span>
                     <button
-                      onClick={() => updateQty(item.id, 1)}
+                      onClick={() => updateQty(item.product.id, 1)}
                       className="w-6 h-6 flex items-center justify-center bg-surface-container rounded border border-outline-variant/30 hover:bg-primary-container/20 transition-colors"
                     >
                       +
                     </button>
                   </div>
                   <span className="text-label-sm text-secondary">
-                    KES {item.price.toLocaleString()} ea
+                    KES {item.product.price.toLocaleString()} ea
                   </span>
                 </div>
               </div>
@@ -251,9 +329,13 @@ export default function POSPage() {
 
           {/* Actions */}
           <div className="flex flex-col gap-2">
-            <button className="w-full bg-[#28a745] hover:bg-[#218838] py-4 rounded text-white font-bold flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.98]">
+            <button
+              onClick={completeSale}
+              disabled={checkingOut || cart.length === 0}
+              className="w-full bg-[#28a745] hover:bg-[#218838] py-4 rounded text-white font-bold flex items-center justify-center gap-2 shadow-lg transition-all active:scale-[0.98] disabled:opacity-50"
+            >
               <span className="material-symbols-outlined">check_circle</span>
-              COMPLETE SALE (F10)
+              {checkingOut ? "PROCESSING…" : "COMPLETE SALE (F10)"}
             </button>
             <button className="w-full bg-white text-primary hover:bg-surface-container py-3 rounded font-bold border border-primary transition-all active:scale-[0.98]">
               SAVE AS QUOTATION

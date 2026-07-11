@@ -1,79 +1,174 @@
+// src/app/(dashboard)/sales/quotations/page.tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import PanelCard from "@/components/ui/PanelCard";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import Badge from "@/components/ui/Badge";
 import Pagination from "@/components/ui/Pagination";
+import { quotationsApi, ApiError, QuotationResponseDto } from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 
-interface Quotation {
-  id: string;
-  date: string;
-  customer: string;
-  description: string;
-  total: string;
-  status: "Pending" | "Accepted" | "Converted" | "Expired";
-}
+type BadgeColor = "amber" | "emerald" | "blue" | "gray";
 
-const QUOTATIONS: Quotation[] = [
-  { id: "#QUO-8821", date: "Oct 24, 2023", customer: "Victory Church", description: "PA System Installation & Rigging", total: "$12,450.00", status: "Pending" },
-  { id: "#QUO-8819", date: "Oct 22, 2023", customer: "Westgate Hotels", description: '15x 65" TV Bulk Order - Hospitality Line', total: "$24,900.00", status: "Accepted" },
-  { id: "#QUO-8815", date: "Oct 20, 2023", customer: "TechNova Solutions", description: "Office Network Infrastructure Upgrade", total: "$8,200.00", status: "Converted" },
-  { id: "#QUO-8799", date: "Oct 15, 2023", customer: "Gorman High School", description: "30x Student Laptops (Lease Quote)", total: "$18,000.00", status: "Expired" },
-  { id: "#QUO-8782", date: "Oct 12, 2023", customer: "Riverside Cafe", description: "New POS Terminals & Thermal Printers", total: "$3,450.00", status: "Pending" },
-];
-
-const STATUS_BADGE: Record<Quotation["status"], "amber" | "emerald" | "blue" | "gray"> = {
-  Pending: "amber",
-  Accepted: "emerald",
-  Converted: "blue",
-  Expired: "gray",
+const STATUS_BADGE: Record<string, BadgeColor> = {
+  PENDING: "amber",
+  ACCEPTED: "emerald",
+  CONVERTED: "blue",
+  EXPIRED: "gray",
 };
 
-function ActionButtons({ status }: { status: Quotation["status"] }) {
-  const isConverted = status === "Converted";
-  const isExpired = status === "Expired";
+function statusLabel(status: string) {
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}
 
-  return (
-    <div className="flex justify-end gap-2">
-      <button
-        className={`p-1 rounded transition-colors ${
-          isConverted ? "cursor-default opacity-30" : "hover:bg-primary-container/10"
-        }`}
-        title={isExpired ? "Renew" : "Edit"}
-      >
-        <span className="material-symbols-outlined text-[18px] text-secondary">
-          {isExpired ? "refresh" : "edit"}
-        </span>
-      </button>
-      <button
-        className={`p-1 rounded transition-colors ${
-          isExpired ? "cursor-default opacity-30" : "hover:bg-primary-container/10"
-        }`}
-        title={isConverted ? "View Linked Sale" : "Convert to Sale"}
-      >
-        <span className="material-symbols-outlined text-[18px] text-primary">
-          {isConverted ? "link" : "point_of_sale"}
-        </span>
-      </button>
-      <button
-        className={`p-1 rounded transition-colors ${
-          isConverted ? "cursor-default opacity-30" : "hover:bg-error-container/10"
-        }`}
-        title="Delete"
-      >
-        <span className="material-symbols-outlined text-[18px] text-error">delete</span>
-      </button>
-    </div>
-  );
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export default function QuotationsPage() {
-  const columns: Column<Quotation>[] = [
-    { header: "Quote ID", width: "120px", render: (q) => <span className="font-body-semibold text-primary">{q.id}</span> },
-    { header: "Date", render: (q) => q.date },
-    { header: "Customer", render: (q) => q.customer },
-    { header: "Description", render: (q) => <span className="text-secondary">{q.description}</span> },
-    { header: "Total Value", align: "right", render: (q) => <span className="font-body-semibold">{q.total}</span> },
-    { header: "Status", align: "center", render: (q) => <Badge color={STATUS_BADGE[q.status]}>{q.status}</Badge> },
-    { header: "Actions", align: "right", render: (q) => <ActionButtons status={q.status} /> },
+  const toast = useToast();
+  const [quotations, setQuotations] = useState<QuotationResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All Statuses");
+  const [dateFilter, setDateFilter] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      setQuotations(await quotationsApi.list());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load quotations.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const filtered = useMemo(() => {
+    let list = quotations;
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (quo) => String(quo.id).includes(q) || quo.customerName?.toLowerCase().includes(q)
+      );
+    }
+
+    if (statusFilter !== "All Statuses") {
+      list = list.filter((quo) => quo.status?.toUpperCase() === statusFilter.toUpperCase());
+    }
+
+    if (dateFilter) {
+      list = list.filter((quo) => quo.quotationDate.slice(0, 10) === dateFilter);
+    }
+
+    return list;
+  }, [quotations, search, statusFilter, dateFilter]);
+
+  async function handleConvert(q: QuotationResponseDto) {
+    const status = q.status?.toUpperCase();
+    if (status === "CONVERTED" || status === "EXPIRED") return;
+    if (!confirm(`Convert quotation #${q.id} to a completed sale?`)) return;
+    try {
+      await quotationsApi.convert(q.id);
+      toast.success(`Quotation #${q.id} converted to a sale.`);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not convert quotation.");
+    }
+  }
+
+  async function handleDelete(q: QuotationResponseDto) {
+    if (q.status?.toUpperCase() === "CONVERTED") return;
+    if (!confirm(`Delete quotation #${q.id}?`)) return;
+    try {
+      await quotationsApi.remove(q.id);
+      setQuotations((prev) => prev.filter((x) => x.id !== q.id));
+      toast.success(`Quotation #${q.id} deleted.`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not delete quotation.");
+    }
+  }
+
+  function ActionButtons({ q }: { q: QuotationResponseDto }) {
+    const status = q.status?.toUpperCase();
+    const isConverted = status === "CONVERTED";
+    const isExpired = status === "EXPIRED";
+
+    return (
+      <div className="flex justify-end gap-2">
+        <button
+          disabled={isConverted}
+          className={`p-1 rounded transition-colors ${
+            isConverted ? "cursor-default opacity-30" : "hover:bg-primary-container/10"
+          }`}
+          title={isExpired ? "Renew" : "Edit"}
+        >
+          <span className="material-symbols-outlined text-[18px] text-secondary">
+            {isExpired ? "refresh" : "edit"}
+          </span>
+        </button>
+        <button
+          onClick={() => handleConvert(q)}
+          disabled={isConverted || isExpired}
+          className={`p-1 rounded transition-colors ${
+            isConverted || isExpired ? "cursor-default opacity-30" : "hover:bg-primary-container/10"
+          }`}
+          title={isConverted ? `Linked sale #${q.convertedSaleId}` : "Convert to Sale"}
+        >
+          <span className="material-symbols-outlined text-[18px] text-primary">
+            {isConverted ? "link" : "point_of_sale"}
+          </span>
+        </button>
+        <button
+          onClick={() => handleDelete(q)}
+          disabled={isConverted}
+          className={`p-1 rounded transition-colors ${
+            isConverted ? "cursor-default opacity-30" : "hover:bg-error-container/10"
+          }`}
+          title="Delete"
+        >
+          <span className="material-symbols-outlined text-[18px] text-error">delete</span>
+        </button>
+      </div>
+    );
+  }
+
+  const columns: Column<QuotationResponseDto>[] = [
+    { header: "Quote ID", width: "120px", render: (q) => <span className="font-body-semibold text-primary">#{q.id}</span> },
+    { header: "Date", render: (q) => formatDate(q.quotationDate) },
+    { header: "Customer", render: (q) => q.customerName ?? "Walk-in" },
+    {
+      header: "Description",
+      render: (q) => (
+        <span className="text-secondary">
+          {q.items.map((i) => `${i.productName} (x${i.quantity})`).join(", ") || "—"}
+        </span>
+      ),
+    },
+    {
+      header: "Total Value",
+      align: "right",
+      render: (q) => <span className="font-body-semibold">KES {q.totalAmount.toLocaleString()}</span>,
+    },
+    {
+      header: "Status",
+      align: "center",
+      render: (q) => (
+        <Badge color={STATUS_BADGE[q.status?.toUpperCase() ?? ""] ?? "gray"}>
+          {statusLabel(q.status ?? "Unknown")}
+        </Badge>
+      ),
+    },
+    { header: "Actions", align: "right", render: (q) => <ActionButtons q={q} /> },
   ];
 
   return (
@@ -91,6 +186,10 @@ export default function QuotationsPage() {
         </button>
       </div>
 
+      {error && (
+        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
+      )}
+
       <div className="bg-surface-container-lowest border border-outline-variant/20 rounded p-4 shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="flex flex-col gap-1">
@@ -100,13 +199,19 @@ export default function QuotationsPage() {
                 className="w-full border-surface-variant focus:ring-primary focus:border-primary text-body-reg py-1.5 pl-8 rounded"
                 placeholder="ID, Customer..."
                 type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
               />
               <span className="material-symbols-outlined absolute left-2 top-2 text-secondary text-[18px]">search</span>
             </div>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-bold text-secondary uppercase">Status Filter</label>
-            <select className="border-surface-variant focus:ring-primary focus:border-primary text-body-reg py-1.5 rounded">
+            <select
+              className="border-surface-variant focus:ring-primary focus:border-primary text-body-reg py-1.5 rounded"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
               <option>All Statuses</option>
               <option>Pending</option>
               <option>Accepted</option>
@@ -116,11 +221,23 @@ export default function QuotationsPage() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-bold text-secondary uppercase">Date Range</label>
-            <input className="border-surface-variant focus:ring-primary focus:border-primary text-body-reg py-1.5 rounded" type="date" />
+            <input
+              className="border-surface-variant focus:ring-primary focus:border-primary text-body-reg py-1.5 rounded"
+              type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+            />
           </div>
           <div className="flex items-end">
-            <button className="bg-secondary text-on-primary px-4 py-1.5 rounded w-full hover:bg-on-secondary-fixed-variant transition-colors font-body-reg">
-              Apply Filters
+            <button
+              onClick={() => {
+                setSearch("");
+                setStatusFilter("All Statuses");
+                setDateFilter("");
+              }}
+              className="bg-secondary text-on-primary px-4 py-1.5 rounded w-full hover:bg-on-secondary-fixed-variant transition-colors font-body-reg"
+            >
+              Reset Filters
             </button>
           </div>
         </div>
@@ -140,8 +257,22 @@ export default function QuotationsPage() {
           </div>
         }
       >
-        <DataTable columns={columns} rows={QUOTATIONS} rowKey={(q) => q.id} />
-        <Pagination showingFrom={1} showingTo={5} total={42} currentPage={1} totalPages={9} />
+        {loading ? (
+          <p className="p-6 text-center text-secondary">Loading quotations…</p>
+        ) : filtered.length === 0 ? (
+          <p className="p-6 text-center text-secondary">No quotations found.</p>
+        ) : (
+          <>
+            <DataTable columns={columns} rows={filtered} rowKey={(q) => q.id.toString()} />
+            <Pagination
+              showingFrom={filtered.length ? 1 : 0}
+              showingTo={filtered.length}
+              total={filtered.length}
+              currentPage={1}
+              totalPages={1}
+            />
+          </>
+        )}
       </PanelCard>
     </div>
   );

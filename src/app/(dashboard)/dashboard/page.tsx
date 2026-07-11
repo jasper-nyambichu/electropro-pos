@@ -1,5 +1,28 @@
+// src/app/(dashboard)/dashboard/page.tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import SalesChart from "@/components/charts/SalesChart";
+import {
+  categoriesApi,
+  customersApi,
+  productsApi,
+  quotationsApi,
+  salesApi,
+  ApiError,
+  CategoryResponseDto,
+  CustomerResponseDto,
+  ProductResponseDto,
+  QuotationResponseDto,
+  SaleResponseDto,
+} from "@/lib/api";
+
+interface TopProduct {
+  name: string;
+  revenue: number;
+  pct: number;
+}
 
 interface Tile {
   value: string | number;
@@ -9,30 +32,88 @@ interface Tile {
   href: string;
 }
 
-const TILES: Tile[] = [
-  { value: 3, label: "POS Terminals", icon: "monitor", bg: "#E74C3C", href: "/pos" },
-  { value: 47, label: "Products", icon: "barcode_scanner", bg: "#E67E22", href: "/products" },
-  { value: 524, label: "Total Sales", icon: "shopping_cart", bg: "#F1C40F", href: "/sales" },
-  { value: 8, label: "Open Invoices", icon: "notifications_active", bg: "#27AE60", href: "/sales" },
-  { value: 6, label: "Categories", icon: "sell", bg: "#2980B9", href: "/categories" },
-  { value: 3, label: "Quotations", icon: "description", bg: "#8E44AD", href: "/sales/quotations" },
-  { value: 38, label: "Customers", icon: "group", bg: "#E67E22", href: "/customers" },
-  { value: "·", label: "Settings", icon: "settings", bg: "#E74C3C", href: "/settings" },
-  { value: "·", label: "Reports", icon: "analytics", bg: "#95A5A6", href: "/reports/daily" },
-  { value: 4, label: "Staff Users", icon: "person", bg: "#3498DB", href: "/settings" },
-  { value: "·", label: "Data Backup", icon: "database", bg: "#2C3E50", href: "/settings" },
-  { value: 1, label: "Branch", icon: "storefront", bg: "#27AE60", href: "/settings" },
-];
-
-const TOP_PRODUCTS = [
-  { name: 'Samsung 55" UHD', value: "KES 156,000", pct: 85 },
-  { name: "Yamaha DBR12 Active", value: "KES 110,000", pct: 70 },
-  { name: "Behringer Mixer 1204", value: "KES 64,000", pct: 55 },
-  { name: "Sony WH-1000XM5", value: "KES 58,000", pct: 45 },
-  { name: "Crown PA Speaker", value: "KES 42,500", pct: 30 },
-];
-
 export default function DashboardPage() {
+  const [products, setProducts] = useState<ProductResponseDto[]>([]);
+  const [categories, setCategories] = useState<CategoryResponseDto[]>([]);
+  const [customers, setCustomers] = useState<CustomerResponseDto[]>([]);
+  const [sales, setSales] = useState<SaleResponseDto[]>([]);
+  const [quotations, setQuotations] = useState<QuotationResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      productsApi.list(),
+      categoriesApi.list(),
+      customersApi.list(),
+      salesApi.list(),
+      quotationsApi.list(),
+    ])
+      .then(([p, c, cu, s, q]) => {
+        setProducts(p);
+        setCategories(c);
+        setCustomers(cu);
+        setSales(s);
+        setQuotations(q);
+      })
+      .catch((err) =>
+        setError(err instanceof ApiError ? err.message : "Failed to load dashboard data.")
+      )
+      .finally(() => setLoading(false));
+  }, []);
+
+  const completedSales = useMemo(
+    () => sales.filter((s) => s.status !== "REFUNDED"),
+    [sales]
+  );
+
+  // "Open" = quotations not yet converted into a sale
+  const openInvoices = useMemo(
+    () => quotations.filter((q) => !q.convertedSaleId).length,
+    [quotations]
+  );
+
+  const topProducts: TopProduct[] = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const sale of completedSales) {
+      for (const item of sale.items) {
+        totals.set(item.productName, (totals.get(item.productName) ?? 0) + item.subtotal);
+      }
+    }
+    const sorted = Array.from(totals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+    const max = sorted[0]?.[1] ?? 1;
+    return sorted.map(([name, revenue]) => ({
+      name,
+      revenue,
+      pct: Math.round((revenue / max) * 100),
+    }));
+  }, [completedSales]);
+
+  const monthLabel = useMemo(
+    () => new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" }),
+    []
+  );
+
+  const tiles: Tile[] = [
+    // No terminals/staff/backup/branch endpoints exist yet — kept static.
+    { value: "3", label: "POS Terminals", icon: "monitor", bg: "#E74C3C", href: "/pos" },
+    { value: products.length, label: "Products", icon: "barcode_scanner", bg: "#E67E22", href: "/products" },
+    { value: completedSales.length, label: "Total Sales", icon: "shopping_cart", bg: "#F1C40F", href: "/sales" },
+    { value: openInvoices, label: "Open Invoices", icon: "notifications_active", bg: "#27AE60", href: "/sales" },
+    { value: categories.length, label: "Categories", icon: "sell", bg: "#2980B9", href: "/categories" },
+    { value: quotations.length, label: "Quotations", icon: "description", bg: "#8E44AD", href: "/sales/quotations" },
+    { value: customers.length, label: "Customers", icon: "group", bg: "#E67E22", href: "/customers" },
+    { value: "·", label: "Settings", icon: "settings", bg: "#E74C3C", href: "/settings" },
+    { value: "·", label: "Reports", icon: "analytics", bg: "#95A5A6", href: "/reports/daily" },
+    { value: "4", label: "Staff Users", icon: "person", bg: "#3498DB", href: "/settings" },
+    { value: "·", label: "Data Backup", icon: "database", bg: "#2C3E50", href: "/settings" },
+    { value: "1", label: "Branch", icon: "storefront", bg: "#27AE60", href: "/settings" },
+  ];
+
   return (
     <div>
       {/* Page Header */}
@@ -48,6 +129,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm mb-6">
+          {error}
+        </div>
+      )}
+
       {/* Quick Links Panel */}
       <div className="bg-white border border-surface-container shadow-sm mb-6">
         <div className="px-gutter py-2 border-b border-surface-container font-panel-header text-panel-header flex items-center">
@@ -55,14 +142,16 @@ export default function DashboardPage() {
           Quick Links
         </div>
         <div className="p-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {TILES.map((tile) => (
+          {tiles.map((tile) => (
             <Link
               key={tile.label}
               href={tile.href}
               className="relative h-[120px] text-white p-4 rounded-sm overflow-hidden shadow-sm hover:brightness-95 transition-all cursor-pointer dashboard-tile block"
               style={{ backgroundColor: tile.bg }}
             >
-              <div className="font-tile-number text-tile-number leading-none">{tile.value}</div>
+              <div className="font-tile-number text-tile-number leading-none">
+                {loading ? "…" : tile.value}
+              </div>
               <div className="font-body-reg text-body-reg mt-1">{tile.label}</div>
               <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 pointer-events-none">
                 {tile.icon}
@@ -106,23 +195,29 @@ export default function DashboardPage() {
         <div className="lg:col-span-4 bg-white border border-surface-container shadow-sm">
           <div className="px-gutter py-2 border-b border-surface-container font-panel-header text-panel-header flex items-center">
             <span className="material-symbols-outlined mr-2 text-[18px]">inventory</span>
-            Top Products (December 2024)
+            Top Products ({monthLabel})
           </div>
           <div className="p-5 flex flex-col gap-6">
-            {TOP_PRODUCTS.map((p) => (
-              <div key={p.name}>
-                <div className="flex justify-between font-body-semibold text-body-semibold mb-1">
-                  <span>{p.name}</span>
-                  <span className="text-primary">{p.value}</span>
+            {loading ? (
+              <p className="text-center text-secondary text-label-sm">Loading…</p>
+            ) : topProducts.length === 0 ? (
+              <p className="text-center text-secondary text-label-sm">No completed sales yet.</p>
+            ) : (
+              topProducts.map((p) => (
+                <div key={p.name}>
+                  <div className="flex justify-between font-body-semibold text-body-semibold mb-1">
+                    <span>{p.name}</span>
+                    <span className="text-primary">KES {Math.round(p.revenue).toLocaleString()}</span>
+                  </div>
+                  <div className="w-full bg-surface-container-high h-2 rounded-full">
+                    <div
+                      className="bg-[#27AE60] h-full rounded-full"
+                      style={{ width: `${p.pct}%` }}
+                    ></div>
+                  </div>
                 </div>
-                <div className="w-full bg-surface-container-high h-2 rounded-full">
-                  <div
-                    className="bg-[#27AE60] h-full rounded-full"
-                    style={{ width: `${p.pct}%` }}
-                  ></div>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

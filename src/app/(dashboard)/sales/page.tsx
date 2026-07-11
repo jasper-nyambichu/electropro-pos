@@ -1,75 +1,169 @@
+// src/app/(dashboard)/sales/page.tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import StatTile from "@/components/ui/StatTile";
 import PanelCard from "@/components/ui/PanelCard";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import Badge from "@/components/ui/Badge";
 import Pagination from "@/components/ui/Pagination";
+import { salesApi, ApiError, SaleResponseDto } from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 
-interface Sale {
-  id: string;
-  date: string;
-  items: string;
-  payment: "Mpesa" | "Credit" | "Cash";
-  total: string;
-  status: "Completed" | "Voided";
-}
-
-const SALES: Sale[] = [
-  { id: "#SAL-89230", date: "2024-05-18 14:32", items: "iPhone 15 Pro, Case x2", payment: "Mpesa", total: "164,500.00", status: "Completed" },
-  { id: "#SAL-89229", date: "2024-05-18 13:15", items: "Logitech MX Master 3S", payment: "Credit", total: "12,500.00", status: "Completed" },
-  { id: "#SAL-89228", date: "2024-05-18 11:45", items: "Samsung T7 1TB SSD", payment: "Cash", total: "15,800.00", status: "Voided" },
-  { id: "#SAL-89227", date: "2024-05-18 10:20", items: "MacBook Air M2, Hub", payment: "Mpesa", total: "185,000.00", status: "Completed" },
-  { id: "#SAL-89226", date: "2024-05-17 18:50", items: 'Dell UltraSharp 27"', payment: "Credit", total: "54,200.00", status: "Completed" },
-  { id: "#SAL-89225", date: "2024-05-17 16:10", items: "AirPods Pro Gen 2", payment: "Cash", total: "32,000.00", status: "Completed" },
-  { id: "#SAL-89224", date: "2024-05-17 14:05", items: "Anker PowerBank 20k", payment: "Mpesa", total: "7,500.00", status: "Completed" },
-  { id: "#SAL-89223", date: "2024-05-17 11:30", items: "Keychron K2 V2", payment: "Cash", total: "14,200.00", status: "Completed" },
-];
-
-const PAYMENT_DOT: Record<Sale["payment"], string> = {
-  Mpesa: "bg-green-500",
-  Credit: "bg-blue-500",
-  Cash: "bg-gray-500",
+const PAYMENT_DOT: Record<string, string> = {
+  CASH: "bg-gray-500",
+  MPESA: "bg-green-500",
+  CREDIT: "bg-blue-500",
 };
 
-const WEEKLY_DATA = [
-  { day: "Mon", height: 60 },
-  { day: "Tue", height: 85 },
-  { day: "Wed", height: 45 },
-  { day: "Thu", height: 70 },
-  { day: "Fri", height: 95 },
-  { day: "Sat", height: 30 },
-  { day: "Sun", height: 20 },
-];
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function last7Days() {
+  const days: string[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return days;
+}
 
 export default function SalesPage() {
-  const columns: Column<Sale>[] = [
-    { header: "Sale ID", render: (s) => <span className="font-body-semibold text-primary">{s.id}</span> },
-    { header: "Date", render: (s) => s.date },
-    { header: "Items", render: (s) => s.items },
+  const toast = useToast();
+  const [sales, setSales] = useState<SaleResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [dateFilter, setDateFilter] = useState("");
+  const [paymentFilter, setPaymentFilter] = useState("All Methods");
+  const [statusFilter, setStatusFilter] = useState("All Status");
+  const [search, setSearch] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      setSales(await salesApi.list());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load sales.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const today = todayIso();
+  const todaySales = useMemo(
+    () => sales.filter((s) => s.saleDate.slice(0, 10) === today && s.status !== "REFUNDED"),
+    [sales, today]
+  );
+  const todayRevenue = todaySales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const avgSale = todaySales.length ? todayRevenue / todaySales.length : 0;
+  const vatCollected = todayRevenue * 0.16;
+
+  const filtered = useMemo(() => {
+    let list = sales;
+
+    if (dateFilter) {
+      list = list.filter((s) => s.saleDate.slice(0, 10) === dateFilter);
+    }
+    if (paymentFilter !== "All Methods") {
+      list = list.filter((s) => s.paymentMethod?.toUpperCase() === paymentFilter.toUpperCase());
+    }
+    if (statusFilter !== "All Status") {
+      const wantRefunded = statusFilter === "Voided";
+      list = list.filter((s) => (s.status === "REFUNDED") === wantRefunded);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (s) => s.receiptNumber.toLowerCase().includes(q) || s.customerName?.toLowerCase().includes(q)
+      );
+    }
+
+    return [...list].sort((a, b) => new Date(b.saleDate).getTime() - new Date(a.saleDate).getTime());
+  }, [sales, dateFilter, paymentFilter, statusFilter, search]);
+
+  const weeklyData = useMemo(() => {
+    const days = last7Days();
+    const totals = days.map((day) =>
+      sales
+        .filter((s) => s.saleDate.slice(0, 10) === day && s.status !== "REFUNDED")
+        .reduce((sum, s) => sum + s.totalAmount, 0)
+    );
+    const max = Math.max(...totals, 1);
+    return days.map((day, i) => ({
+      day: new Date(day).toLocaleDateString("en-US", { weekday: "short" }),
+      revenue: totals[i],
+      height: Math.round((totals[i] / max) * 100) || 4,
+    }));
+  }, [sales]);
+
+  async function handleRefund(s: SaleResponseDto) {
+    if (s.status === "REFUNDED") return;
+    if (!confirm(`Refund sale ${s.receiptNumber}?`)) return;
+    try {
+      await salesApi.refund(s.id);
+      toast.success(`Sale ${s.receiptNumber} refunded.`);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not refund sale.");
+    }
+  }
+
+  const columns: Column<SaleResponseDto>[] = [
+    { header: "Sale ID", render: (s) => <span className="font-body-semibold text-primary">{s.receiptNumber}</span> },
+    { header: "Date", render: (s) => new Date(s.saleDate).toLocaleString() },
+    {
+      header: "Items",
+      render: (s) => s.items.map((i) => `${i.productName} (x${i.quantity})`).join(", ") || "—",
+    },
     {
       header: "Payment Method",
       render: (s) => (
         <span className="flex items-center gap-1">
-          <span className={`w-2 h-2 rounded-full ${PAYMENT_DOT[s.payment]}`}></span> {s.payment}
+          <span className={`w-2 h-2 rounded-full ${PAYMENT_DOT[s.paymentMethod?.toUpperCase()] ?? "bg-gray-400"}`}></span>{" "}
+          {s.paymentMethod}
         </span>
       ),
     },
-    { header: "Total (KES)", render: (s) => <span className="font-body-semibold text-primary">{s.total}</span> },
+    {
+      header: "Total (KES)",
+      render: (s) => <span className="font-body-semibold text-primary">{s.totalAmount.toLocaleString()}</span>,
+    },
     {
       header: "Status",
       align: "center",
-      render: (s) => <Badge color={s.status === "Completed" ? "green" : "red"}>{s.status}</Badge>,
+      render: (s) => (
+        <Badge color={s.status === "REFUNDED" ? "red" : "green"}>
+          {s.status === "REFUNDED" ? "Voided" : "Completed"}
+        </Badge>
+      ),
     },
     {
       header: "Actions",
       align: "right",
       render: (s) => (
         <div className="flex justify-end gap-2">
-          <button className="text-secondary hover:text-primary transition-colors">
+          <button className="text-secondary hover:text-primary transition-colors" title="View">
             <span className="material-symbols-outlined text-[18px]">visibility</span>
           </button>
-          <button className="text-secondary hover:text-primary transition-colors">
+          <button
+            onClick={() => handleRefund(s)}
+            disabled={s.status === "REFUNDED"}
+            className={`transition-colors ${
+              s.status === "REFUNDED" ? "text-secondary opacity-30 cursor-default" : "text-secondary hover:text-error"
+            }`}
+            title={s.status === "REFUNDED" ? "Already refunded" : "Refund sale"}
+          >
             <span className="material-symbols-outlined text-[18px]">
-              {s.status === "Voided" ? "undo" : "edit"}
+              {s.status === "REFUNDED" ? "undo" : "replay"}
             </span>
           </button>
         </div>
@@ -86,27 +180,43 @@ export default function SalesPage() {
             Manage and track all customer transactions
           </p>
         </div>
-        <button className="bg-primary text-on-primary px-4 py-2 rounded-sm font-body-semibold hover:bg-primary-container transition-colors flex items-center gap-2">
+        <Link
+          href="/pos"
+          className="bg-primary text-on-primary px-4 py-2 rounded-sm font-body-semibold hover:bg-primary-container transition-colors flex items-center gap-2"
+        >
           <span className="material-symbols-outlined">add</span>
           New Sale
-        </button>
+        </Link>
       </div>
 
+      {error && (
+        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter">
-        <StatTile value="KES 142k" label="Revenue Today" icon="payments" bgColor="bg-[#00c0ef]" />
-        <StatTile value="48" label="Transactions" icon="shopping_bag" bgColor="bg-[#00a65a]" />
-        <StatTile value="KES 2,958" label="Avg Sale Value" icon="trending_up" bgColor="bg-[#f39c12]" />
-        <StatTile value="KES 19.4k" label="VAT (16%) Collected" icon="account_balance" bgColor="bg-[#dd4b39]" />
+        <StatTile value={`KES ${Math.round(todayRevenue).toLocaleString()}`} label="Revenue Today" icon="payments" bgColor="bg-[#00c0ef]" />
+        <StatTile value={String(todaySales.length)} label="Transactions" icon="shopping_bag" bgColor="bg-[#00a65a]" />
+        <StatTile value={`KES ${Math.round(avgSale).toLocaleString()}`} label="Avg Sale Value" icon="trending_up" bgColor="bg-[#f39c12]" />
+        <StatTile value={`KES ${Math.round(vatCollected).toLocaleString()}`} label="VAT (16%) Collected" icon="account_balance" bgColor="bg-[#dd4b39]" />
       </div>
 
       <div className="bg-surface-container-lowest border border-outline-variant/20 p-4 rounded-sm shadow-sm flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <label className="font-label-sm text-secondary">Date:</label>
-          <input className="border-outline-variant/30 text-body-reg py-1 px-2 focus:border-primary outline-none rounded-sm" type="date" />
+          <input
+            className="border-outline-variant/30 text-body-reg py-1 px-2 focus:border-primary outline-none rounded-sm"
+            type="date"
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+          />
         </div>
         <div className="flex items-center gap-2">
           <label className="font-label-sm text-secondary">Payment:</label>
-          <select className="border-outline-variant/30 text-body-reg py-1 px-2 focus:border-primary outline-none rounded-sm bg-white">
+          <select
+            className="border-outline-variant/30 text-body-reg py-1 px-2 focus:border-primary outline-none rounded-sm bg-white"
+            value={paymentFilter}
+            onChange={(e) => setPaymentFilter(e.target.value)}
+          >
             <option>All Methods</option>
             <option>Cash</option>
             <option>Mpesa</option>
@@ -115,7 +225,11 @@ export default function SalesPage() {
         </div>
         <div className="flex items-center gap-2">
           <label className="font-label-sm text-secondary">Status:</label>
-          <select className="border-outline-variant/30 text-body-reg py-1 px-2 focus:border-primary outline-none rounded-sm bg-white">
+          <select
+            className="border-outline-variant/30 text-body-reg py-1 px-2 focus:border-primary outline-none rounded-sm bg-white"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
             <option>All Status</option>
             <option>Completed</option>
             <option>Voided</option>
@@ -124,11 +238,21 @@ export default function SalesPage() {
         <div className="ml-auto flex items-center gap-2 w-full md:w-auto">
           <input
             className="border-outline-variant/30 text-body-reg py-1 px-2 focus:border-primary outline-none rounded-sm w-full md:w-64"
-            placeholder="Search by ID or Customer..."
+            placeholder="Search by receipt or customer..."
             type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
-          <button className="bg-secondary text-white px-3 py-1.5 rounded-sm hover:bg-on-secondary-fixed-variant transition-colors">
-            <span className="material-symbols-outlined text-[18px]">filter_alt</span>
+          <button
+            onClick={() => {
+              setDateFilter("");
+              setPaymentFilter("All Methods");
+              setStatusFilter("All Status");
+              setSearch("");
+            }}
+            className="bg-secondary text-white px-3 py-1.5 rounded-sm hover:bg-on-secondary-fixed-variant transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">filter_alt_off</span>
           </button>
         </div>
       </div>
@@ -147,8 +271,22 @@ export default function SalesPage() {
           </div>
         }
       >
-        <DataTable columns={columns} rows={SALES} rowKey={(s) => s.id} />
-        <Pagination showingFrom={1} showingTo={8} total={1245} currentPage={1} totalPages={156} />
+        {loading ? (
+          <p className="p-6 text-center text-secondary">Loading sales…</p>
+        ) : filtered.length === 0 ? (
+          <p className="p-6 text-center text-secondary">No sales found.</p>
+        ) : (
+          <>
+            <DataTable columns={columns} rows={filtered} rowKey={(s) => s.id.toString()} />
+            <Pagination
+              showingFrom={filtered.length ? 1 : 0}
+              showingTo={filtered.length}
+              total={filtered.length}
+              currentPage={1}
+              totalPages={1}
+            />
+          </>
+        )}
       </PanelCard>
 
       <div className="bg-surface-container-lowest border border-outline-variant/20 rounded-sm shadow-sm p-4">
@@ -157,9 +295,6 @@ export default function SalesPage() {
           <div className="flex gap-2">
             <span className="flex items-center gap-1 text-[11px]">
               <span className="w-2 h-2 rounded-full bg-primary"></span> Revenue
-            </span>
-            <span className="flex items-center gap-1 text-[11px]">
-              <span className="w-2 h-2 rounded-full bg-secondary"></span> Target
             </span>
           </div>
         </div>
@@ -170,15 +305,15 @@ export default function SalesPage() {
             <div className="border-t border-outline-variant/10 w-full h-px"></div>
             <div className="border-t border-outline-variant/10 w-full h-px"></div>
           </div>
-          {WEEKLY_DATA.map((d) => (
+          {weeklyData.map((d, i) => (
             <div
-              key={d.day}
+              key={`${d.day}-${i}`}
               className="flex-1 bg-primary-container/10 relative group hover:bg-primary-container/20 transition-all cursor-pointer"
               style={{ height: `${d.height}%` }}
             >
               <div className="absolute bottom-0 left-0 right-0 h-1 bg-primary"></div>
-              <span className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] bg-inverse-surface text-white px-1 rounded-sm">
-                {d.day}
+              <span className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] bg-inverse-surface text-white px-1 rounded-sm whitespace-nowrap">
+                {d.day}: KES {Math.round(d.revenue).toLocaleString()}
               </span>
             </div>
           ))}
