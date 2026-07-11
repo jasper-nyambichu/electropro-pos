@@ -1,55 +1,71 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import PanelCard from "@/components/ui/PanelCard";
+import { productsApi, ApiError, ProductResponseDto } from "@/lib/api";
 
-interface StockItem {
-  product: string;
-  brand: string;
-  category: string;
-  stock: number;
-  unitCost: string;
-  totalValue: string;
-  critical?: boolean;
-  outOfStock?: boolean;
-}
-
-const STOCK: StockItem[] = [
-  { product: "iPhone 15 Pro Max", brand: "Apple", category: "Smartphones", stock: 24, unitCost: "155,000", totalValue: "3,720,000" },
-  { product: "MacBook Air M2", brand: "Apple", category: "Laptops", stock: 12, unitCost: "185,000", totalValue: "2,220,000" },
-  { product: "Sony WH-1000XM5", brand: "Sony", category: "Accessories", stock: 3, unitCost: "45,000", totalValue: "135,000", critical: true },
-  { product: "Samsung S24 Ultra", brand: "Samsung", category: "Smartphones", stock: 18, unitCost: "145,000", totalValue: "2,610,000" },
-  { product: "Logitech MX Master 3S", brand: "Logitech", category: "Accessories", stock: 0, unitCost: "12,500", totalValue: "0", outOfStock: true },
-  { product: "Dell XPS 15", brand: "Dell", category: "Laptops", stock: 5, unitCost: "210,000", totalValue: "1,050,000" },
-];
-
-const CATEGORY_VALUES = [
-  { label: "Smartphones", value: "KES 1.8M", color: "bg-primary" },
-  { label: "Laptops", value: "KES 1.2M", color: "bg-secondary" },
-  { label: "Accessories", value: "KES 800K", color: "bg-[#00c0ef]" },
-  { label: "Other", value: "KES 400K", color: "bg-[#f39c12]" },
-];
+const PALETTE = ["#2980B9", "#E74C3C", "#8E44AD", "#E6B800", "#27AE60", "#16A085", "#D35400"];
 
 export default function StockReportPage() {
-  const columns: Column<StockItem>[] = [
+  const [products, setProducts] = useState<ProductResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    productsApi
+      .list()
+      .then(setProducts)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load stock report."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const totalValue = products.reduce((sum, p) => sum + p.price * p.quantity, 0);
+  const lowStockCount = products.filter((p) => p.quantity > 0 && p.quantity <= p.lowStockThreshold).length;
+  const outOfStockCount = products.filter((p) => p.quantity <= 0).length;
+
+  const categoryValues = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const p of products) {
+      const key = p.categoryName ?? "Uncategorized";
+      totals.set(key, (totals.get(key) ?? 0) + p.price * p.quantity);
+    }
+    return Array.from(totals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value], i) => ({ label, value, color: PALETTE[i % PALETTE.length] }));
+  }, [products]);
+
+  const filtered = products.filter(
+    (p) =>
+      search.trim() === "" ||
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.sku.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const columns: Column<ProductResponseDto>[] = [
     {
       header: "Product",
-      render: (s) => (
-        <span className={`font-body-semibold ${s.outOfStock ? "text-error" : ""}`}>{s.product}</span>
+      render: (p) => (
+        <span className={`font-body-semibold ${p.quantity <= 0 ? "text-error" : ""}`}>{p.name}</span>
       ),
     },
-    { header: "Brand", render: (s) => s.brand },
-    { header: "Category", render: (s) => s.category },
+    { header: "SKU", render: (p) => <span className="font-mono text-[12px] text-secondary">{p.sku}</span> },
+    { header: "Category", render: (p) => p.categoryName ?? "Uncategorized" },
     {
       header: "Current Stock",
       align: "right",
-      render: (s) =>
-        s.critical || s.outOfStock ? (
-          <span className="text-error font-bold">{s.stock}</span>
+      render: (p) =>
+        p.quantity <= p.lowStockThreshold ? (
+          <span className="text-error font-bold">{p.quantity}</span>
         ) : (
-          s.stock
+          p.quantity
         ),
     },
-    { header: "Unit Cost", align: "right", render: (s) => s.unitCost },
-    { header: "Total Value", align: "right", render: (s) => <span className="font-body-semibold">{s.totalValue}</span> },
+    { header: "Unit Price", align: "right", render: (p) => p.price.toLocaleString() },
+    { header: "Total Value", align: "right", render: (p) => <span className="font-body-semibold">{(p.price * p.quantity).toLocaleString()}</span> },
   ];
 
   return (
@@ -59,84 +75,62 @@ export default function StockReportPage() {
           <h1 className="font-page-title text-page-title text-on-surface">Stock Report</h1>
           <p className="text-secondary font-body-reg">Detailed inventory analytics and stock health status.</p>
         </div>
-        <div className="flex gap-2">
-          <button className="bg-surface text-secondary border border-outline-variant px-3 py-1.5 rounded-sm font-body-semibold text-[13px] flex items-center gap-1 hover:bg-surface-variant transition-colors">
-            <span className="material-symbols-outlined text-[18px]">download</span> Export PDF
-          </button>
-          <button className="bg-primary text-on-primary px-3 py-1.5 rounded-sm font-body-semibold text-[13px] flex items-center gap-1 hover:opacity-90 transition-opacity">
-            <span className="material-symbols-outlined text-[18px]">print</span> Print Report
-          </button>
-        </div>
       </div>
 
+      {error && (
+        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[15px]">
-        <div className="bg-[#00c0ef] text-white rounded-sm overflow-hidden relative shadow-sm h-32 flex flex-col justify-between">
+        <div className="bg-[#00c0ef] text-white rounded-sm overflow-hidden relative shadow-sm h-24 flex flex-col justify-center">
           <div className="p-4 relative z-10">
-            <h3 className="font-tile-number text-tile-number">1,248</h3>
+            <h3 className="font-tile-number text-tile-number">{products.length}</h3>
             <p className="font-body-reg opacity-90">Total Products</p>
           </div>
           <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 select-none">inventory_2</span>
-          <div className="small-box-footer py-1 px-3 text-center text-[12px] cursor-pointer hover:bg-black/20">
-            More info <span className="material-symbols-outlined text-[12px] align-middle">arrow_circle_right</span>
-          </div>
         </div>
-        <div className="bg-[#00a65a] text-white rounded-sm overflow-hidden relative shadow-sm h-32 flex flex-col justify-between">
+        <div className="bg-[#00a65a] text-white rounded-sm overflow-hidden relative shadow-sm h-24 flex flex-col justify-center">
           <div className="p-4 relative z-10">
-            <h3 className="font-tile-number text-tile-number">KES 4.2M</h3>
+            <h3 className="font-tile-number text-tile-number">KES {Math.round(totalValue).toLocaleString()}</h3>
             <p className="font-body-reg opacity-90">Stock Value</p>
           </div>
           <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 select-none">payments</span>
-          <div className="small-box-footer py-1 px-3 text-center text-[12px] cursor-pointer hover:bg-black/20">
-            More info <span className="material-symbols-outlined text-[12px] align-middle">arrow_circle_right</span>
-          </div>
         </div>
-        <div className="bg-[#f39c12] text-white rounded-sm overflow-hidden relative shadow-sm h-32 flex flex-col justify-between">
+        <div className="bg-[#f39c12] text-white rounded-sm overflow-hidden relative shadow-sm h-24 flex flex-col justify-center">
           <div className="p-4 relative z-10">
-            <h3 className="font-tile-number text-tile-number">42</h3>
+            <h3 className="font-tile-number text-tile-number">{lowStockCount}</h3>
             <p className="font-body-reg opacity-90">Low Stock</p>
           </div>
           <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 select-none">warning</span>
-          <div className="small-box-footer py-1 px-3 text-center text-[12px] cursor-pointer hover:bg-black/20">
-            More info <span className="material-symbols-outlined text-[12px] align-middle">arrow_circle_right</span>
-          </div>
         </div>
-        <div className="bg-[#dd4b39] text-white rounded-sm overflow-hidden relative shadow-sm h-32 flex flex-col justify-between">
+        <div className="bg-[#dd4b39] text-white rounded-sm overflow-hidden relative shadow-sm h-24 flex flex-col justify-center">
           <div className="p-4 relative z-10">
-            <h3 className="font-tile-number text-tile-number">18</h3>
+            <h3 className="font-tile-number text-tile-number">{outOfStockCount}</h3>
             <p className="font-body-reg opacity-90">Out of Stock</p>
           </div>
           <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 select-none">error</span>
-          <div className="small-box-footer py-1 px-3 text-center text-[12px] cursor-pointer hover:bg-black/20">
-            More info <span className="material-symbols-outlined text-[12px] align-middle">arrow_circle_right</span>
-          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-[15px]">
         <div className="lg:col-span-4">
           <PanelCard title="Stock Value by Category" icon="pie_chart">
-            <div className="p-5 flex flex-col items-center justify-center">
-              <div className="relative w-48 h-48 mb-6">
-                <div
-                  className="w-full h-full rounded-full border-[25px]"
-                  style={{ borderColor: "#b32200 #4e6073 #00c0ef #f39c12" }}
-                ></div>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-label-sm text-secondary">Total Value</span>
-                  <span className="font-body-semibold text-on-surface">4.2M</span>
-                </div>
-              </div>
-              <div className="w-full space-y-2">
-                {CATEGORY_VALUES.map((c) => (
-                  <div key={c.label} className="flex justify-between items-center text-label-sm">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-3 h-3 ${c.color} rounded-full`}></span>
-                      <span>{c.label}</span>
+            <div className="p-5">
+              {categoryValues.length === 0 ? (
+                <p className="text-center text-secondary">No stock data yet.</p>
+              ) : (
+                <div className="w-full space-y-2">
+                  {categoryValues.map((c) => (
+                    <div key={c.label} className="flex justify-between items-center text-label-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: c.color }}></span>
+                        <span>{c.label}</span>
+                      </div>
+                      <span className="font-body-semibold">KES {Math.round(c.value).toLocaleString()}</span>
                     </div>
-                    <span className="font-body-semibold">{c.value}</span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </PanelCard>
         </div>
@@ -147,22 +141,19 @@ export default function StockReportPage() {
             icon="list_alt"
             headerExtra={
               <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
                 className="border border-outline-variant text-[12px] px-2 py-1 rounded-sm w-40 focus:ring-1 focus:ring-primary"
                 placeholder="Filter products..."
                 type="text"
               />
             }
           >
-            <DataTable columns={columns} rows={STOCK} rowKey={(s) => s.product} />
-            <div className="px-4 py-3 bg-[#F4F4F4] border-t border-[#EEEEEE] flex justify-between items-center text-label-sm">
-              <span>Showing 1 to 6 of 1,248 entries</span>
-              <div className="flex gap-1">
-                <button className="px-2 py-1 border border-outline-variant bg-white hover:bg-surface-variant rounded-sm">Previous</button>
-                <button className="px-2 py-1 border border-primary bg-primary text-on-primary rounded-sm">1</button>
-                <button className="px-2 py-1 border border-outline-variant bg-white hover:bg-surface-variant rounded-sm">2</button>
-                <button className="px-2 py-1 border border-outline-variant bg-white hover:bg-surface-variant rounded-sm">Next</button>
-              </div>
-            </div>
+            {loading ? (
+              <p className="p-6 text-center text-secondary">Loading…</p>
+            ) : (
+              <DataTable columns={columns} rows={filtered} rowKey={(p) => String(p.id)} />
+            )}
           </PanelCard>
         </div>
       </div>

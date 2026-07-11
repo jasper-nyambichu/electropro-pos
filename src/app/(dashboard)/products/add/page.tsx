@@ -1,58 +1,55 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import PanelCard from "@/components/ui/PanelCard";
+import {
+  categoriesApi,
+  productsApi,
+  ApiError,
+  CategoryResponseDto,
+} from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 
 interface ProductForm {
   name: string;
-  brand: string;
   sku: string;
-  category: string;
+  categoryId: string;
   stockQty: string;
+  lowStockThreshold: string;
   costPrice: string;
   sellingPrice: string;
-  vat: string;
-  warranty: string;
   barcode: string;
-  active: boolean;
-  featuredOnPos: boolean;
+  imageUrl: string;
 }
 
-const BRANDS = ["Sony", "Samsung", "Apple", "LG"];
-const CATEGORIES = [
-  "Audio & Headphones",
-  "Smartphones",
-  "Laptops",
-  "Wearables",
-];
+const EMPTY_FORM: ProductForm = {
+  name: "",
+  sku: "",
+  categoryId: "",
+  stockQty: "",
+  lowStockThreshold: "5",
+  costPrice: "",
+  sellingPrice: "",
+  barcode: "",
+  imageUrl: "",
+};
 
 export default function AddProductPage() {
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
 
-  const [form, setForm] = useState<ProductForm>({
-    name: "",
-    brand: "",
-    sku: "",
-    category: "",
-    stockQty: "",
-    costPrice: "",
-    sellingPrice: "",
-    vat: "16",
-    warranty: "",
-    barcode: "",
-    active: true,
-    featuredOnPos: false,
-  });
+  const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+  const [categories, setCategories] = useState<CategoryResponseDto[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Preview images: first slot is the placeholder headphone image, rest are empty
-  const [images, setImages] = useState<(string | null)[]>([
-    "https://lh3.googleusercontent.com/aida-public/AB6AXuDCZd_RhjbS8pLzIrRX6WvHUIFacgtqT4e-0sjkDBg4qnE63nSv5CuyJizZqRc8tt7JYvyNX0nH_1WpGlA9rJt5KjOZaAFufW_UoEpkm9Y8nrfJq5CB2ZXAN_qvhfmSYRuSnDZz4nAQtD5u9soMUYVmre0zbzLxY_Kb2hDoWXhBHNJL1chaRXZO0QT43XOOEjWTy-yQFb12Q3lt5MXKU3IsJXYV_dxBWgviubvMcJRG37fJdePoSYxVPV9AHmCO4bM6fkh-BMAfQsMq",
-    null,
-    null,
-  ]);
-  const [activeUploadSlot, setActiveUploadSlot] = useState<number | null>(null);
+  useEffect(() => {
+    categoriesApi.list().then(setCategories).catch(() => {
+      // categories are optional on the form; a load failure just means
+      // the dropdown is empty and the product is saved uncategorized
+    });
+  }, []);
 
   function handleField<K extends keyof ProductForm>(
     key: K,
@@ -61,58 +58,43 @@ export default function AddProductPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || activeUploadSlot === null) return;
-    const url = URL.createObjectURL(file);
-    setImages((prev) => {
-      const next = [...prev];
-      next[activeUploadSlot] = url;
-      return next;
-    });
-    setActiveUploadSlot(null);
-    e.target.value = "";
-  }
+  async function handleSave() {
+    setError(null);
 
-  function removeImage(index: number) {
-    setImages((prev) => {
-      const next = [...prev];
-      next[index] = null;
-      return next;
-    });
-  }
-
-  function triggerUpload(slot: number) {
-    setActiveUploadSlot(slot);
-    fileInputRef.current?.click();
-  }
-
-  function handleDropZoneUpload() {
-    // Find first empty slot
-    const emptySlot = images.findIndex((img) => img === null);
-    if (emptySlot !== -1) {
-      triggerUpload(emptySlot);
-    } else {
-      triggerUpload(0); // replace first if all full
+    if (!form.name.trim() || !form.sku.trim() || !form.sellingPrice) {
+      setError("Name, SKU, and Selling Price are required.");
+      return;
     }
-  }
 
-  function handleSave() {
-    // Placeholder — wire to your API/action
-    console.log("Saving product:", form, images);
+    setSaving(true);
+    try {
+      const created = await productsApi.create({
+        name: form.name.trim(),
+        sku: form.sku.trim(),
+        price: Number(form.sellingPrice),
+        costPrice: Number(form.costPrice || 0),
+        quantity: Number(form.stockQty || 0),
+        lowStockThreshold: Number(form.lowStockThreshold || 0),
+        barcode: form.barcode.trim() || undefined,
+        imageUrl: form.imageUrl.trim() || undefined,
+        categoryId: form.categoryId ? Number(form.categoryId) : undefined,
+      });
+      toast.success(`"${created.name}" was added to inventory.`);
+      router.push("/products");
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? `Could not save product: ${err.message}`
+          : "Could not save product. Check your connection to the server.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <>
-      {/* Hidden file input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        className="hidden"
-        onChange={handleImageUpload}
-      />
-
       {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
@@ -132,12 +114,19 @@ export default function AddProductPage() {
           </button>
           <button
             onClick={handleSave}
-            className="bg-primary text-on-primary px-6 py-2 rounded-sm text-body-semibold hover:opacity-90 shadow-sm transition-opacity"
+            disabled={saving}
+            className="bg-primary text-on-primary px-6 py-2 rounded-sm text-body-semibold hover:opacity-90 shadow-sm transition-opacity disabled:opacity-50"
           >
-            Save Product
+            {saving ? "Saving…" : "Save Product"}
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-error-container/20 border border-error text-error rounded p-3 mb-4 text-label-sm">
+          {error}
+        </div>
+      )}
 
       {/* Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-gutter">
@@ -157,25 +146,6 @@ export default function AddProductPage() {
                   placeholder="e.g. Sony WH-1000XM5 Wireless Headphones"
                   className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface placeholder:text-secondary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                 />
-              </div>
-
-              {/* Brand */}
-              <div>
-                <label className="block text-label-sm font-body-semibold text-secondary mb-1">
-                  Brand
-                </label>
-                <select
-                  value={form.brand}
-                  onChange={(e) => handleField("brand", e.target.value)}
-                  className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                >
-                  <option value="">Select Brand</option>
-                  {BRANDS.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               {/* SKU */}
@@ -198,14 +168,14 @@ export default function AddProductPage() {
                   Category
                 </label>
                 <select
-                  value={form.category}
-                  onChange={(e) => handleField("category", e.target.value)}
+                  value={form.categoryId}
+                  onChange={(e) => handleField("categoryId", e.target.value)}
                   className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                 >
-                  <option value="">Select Category</option>
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
+                  <option value="">Uncategorized</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
                     </option>
                   ))}
                 </select>
@@ -218,9 +188,25 @@ export default function AddProductPage() {
                 </label>
                 <input
                   type="number"
+                  min={0}
                   value={form.stockQty}
                   onChange={(e) => handleField("stockQty", e.target.value)}
                   placeholder="0"
+                  className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface placeholder:text-secondary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                />
+              </div>
+
+              {/* Low stock threshold */}
+              <div>
+                <label className="block text-label-sm font-body-semibold text-secondary mb-1">
+                  Low Stock Threshold
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={form.lowStockThreshold}
+                  onChange={(e) => handleField("lowStockThreshold", e.target.value)}
+                  placeholder="5"
                   className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface placeholder:text-secondary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                 />
               </div>
@@ -234,7 +220,8 @@ export default function AddProductPage() {
                   Cost Price (KES)
                 </label>
                 <input
-                  type="text"
+                  type="number"
+                  min={0}
                   value={form.costPrice}
                   onChange={(e) => handleField("costPrice", e.target.value)}
                   placeholder="0.00"
@@ -248,37 +235,11 @@ export default function AddProductPage() {
                   Selling Price (KES)
                 </label>
                 <input
-                  type="text"
+                  type="number"
+                  min={0}
                   value={form.sellingPrice}
                   onChange={(e) => handleField("sellingPrice", e.target.value)}
                   placeholder="0.00"
-                  className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface placeholder:text-secondary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                />
-              </div>
-
-              {/* VAT */}
-              <div>
-                <label className="block text-label-sm font-body-semibold text-secondary mb-1">
-                  VAT (%)
-                </label>
-                <input
-                  type="text"
-                  value={form.vat}
-                  onChange={(e) => handleField("vat", e.target.value)}
-                  className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                />
-              </div>
-
-              {/* Warranty */}
-              <div>
-                <label className="block text-label-sm font-body-semibold text-secondary mb-1">
-                  Warranty
-                </label>
-                <input
-                  type="text"
-                  value={form.warranty}
-                  onChange={(e) => handleField("warranty", e.target.value)}
-                  placeholder="e.g. 12 Months"
                   className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface placeholder:text-secondary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                 />
               </div>
@@ -301,114 +262,55 @@ export default function AddProductPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Image URL — full width */}
+              <div className="md:col-span-2">
+                <label className="block text-label-sm font-body-semibold text-secondary mb-1">
+                  Image URL
+                </label>
+                <input
+                  type="text"
+                  value={form.imageUrl}
+                  onChange={(e) => handleField("imageUrl", e.target.value)}
+                  placeholder="https://…"
+                  className="w-full border border-outline-variant rounded-sm px-3 py-2 text-body-reg text-on-surface placeholder:text-secondary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                />
+                <p className="text-[11px] text-secondary mt-1">
+                  The backend stores a URL, not an uploaded file — paste a hosted image link.
+                </p>
+              </div>
             </div>
           </PanelCard>
         </div>
 
-        {/* ── Right Column: Media + Status (4/12) ── */}
+        {/* ── Right Column: Preview (4/12) ── */}
         <div className="lg:col-span-4 flex flex-col gap-gutter">
-          {/* Product Media */}
-          <PanelCard title="Product Media" icon="photo_library">
+          <PanelCard title="Preview" icon="visibility">
             <div className="p-5">
-              {/* Drop zone */}
-              <button
-                type="button"
-                onClick={handleDropZoneUpload}
-                className="w-full border-2 border-dashed border-outline-variant rounded-sm p-6 text-center hover:bg-surface-container transition-colors flex flex-col items-center"
-              >
-                <span className="material-symbols-outlined text-outline text-[48px] mb-2">
-                  cloud_upload
-                </span>
-                <p className="text-body-semibold text-on-surface">
-                  Click to upload product image
-                </p>
-                <p className="text-label-sm text-secondary">
-                  PNG, JPG or WEBP (Max 2MB)
-                </p>
-              </button>
-
-              {/* Thumbnail grid */}
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                {images.map((src, i) =>
-                  src ? (
-                    <div
-                      key={i}
-                      className="aspect-square bg-surface-container rounded-sm border border-outline-variant/30 relative group overflow-hidden"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={src}
-                        alt={`Product image ${i + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeImage(i)}
-                        className="absolute top-1 right-1 bg-error text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                        aria-label="Remove image"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">
-                          close
-                        </span>
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => triggerUpload(i)}
-                      className="aspect-square bg-surface-container-low border border-dashed border-outline-variant flex items-center justify-center rounded-sm text-outline hover:bg-surface-container transition-colors"
-                      aria-label="Add image"
-                    >
-                      <span className="material-symbols-outlined">add</span>
-                    </button>
-                  )
+              <div className="aspect-square bg-surface-container rounded-sm border border-outline-variant/30 overflow-hidden flex items-center justify-center">
+                {form.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={form.imageUrl}
+                    alt="Product preview"
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <span className="material-symbols-outlined text-outline-variant text-[64px]">
+                    inventory_2
+                  </span>
                 )}
               </div>
-            </div>
-          </PanelCard>
-
-          {/* Product Status */}
-          <PanelCard title="Product Status" icon="toggle_on">
-            <div className="p-5 space-y-4">
-              {/* Active toggle */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-body-semibold text-on-surface">
-                    Active Status
-                  </p>
-                  <p className="text-[11px] text-secondary">
-                    Enable to show on inventory
-                  </p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.active}
-                    onChange={(e) => handleField("active", e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-surface-variant rounded-full peer peer-checked:bg-primary after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:border-gray-300 after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full peer-checked:after:border-white" />
-                </label>
-              </div>
-
-              {/* POS quick access */}
-              <div className="flex items-center gap-3 py-2 px-3 bg-primary/5 border border-primary/10 rounded-sm">
-                <input
-                  type="checkbox"
-                  id="featurePos"
-                  checked={form.featuredOnPos}
-                  onChange={(e) =>
-                    handleField("featuredOnPos", e.target.checked)
-                  }
-                  className="w-4 h-4 text-primary border-outline-variant rounded-sm focus:ring-primary"
-                />
-                <label
-                  htmlFor="featurePos"
-                  className="text-body-reg text-on-surface cursor-pointer select-none"
-                >
-                  Feature on POS Quick Access
-                </label>
+              <div className="mt-4 space-y-1">
+                <p className="text-body-semibold text-on-surface">
+                  {form.name || "Product name"}
+                </p>
+                <p className="text-primary font-bold">
+                  KES {Number(form.sellingPrice || 0).toLocaleString()}
+                </p>
               </div>
             </div>
           </PanelCard>

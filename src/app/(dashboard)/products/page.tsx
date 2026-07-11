@@ -1,153 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type StockStatus = "in-stock" | "low-stock" | "out-of-stock";
-
-interface Product {
-  id: string;
-  sku: string;
-  name: string;
-  brand: string;
-  category: string;
-  price: number;
-  stock: number | null; // null = out of stock
-  stockStatus: StockStatus;
-  image: string | null; // null = placeholder icon
-}
-
-// ─── Static seed data (replace with real fetch/server data as needed) ────────
-
-const INITIAL_PRODUCTS: Product[] = [
-  {
-    id: "1",
-    sku: "TV-SAM-55-CU7K",
-    name: 'Samsung 55" CU7000',
-    brand: "Samsung",
-    category: "Televisions",
-    price: 84999,
-    stock: 24,
-    stockStatus: "in-stock",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuABjzKGZzU8FiNmBEFk2spQJYfyXnJy8CdBdXXG7AQop1LRWnRKJUja80RKM-Y8WSAk5T3RT0KffzToXb3JufRKvo4ZlGH8Dw6NxQ8jUUqRGoEkiZ205Z32WiRsZiSkcfvk3hPobRc2yVwUPBSj571zF17zmJgAmfp4jav1xWHoe4btA0qCd08VP1yEaJ12gExwVz7SJYcrnCxxA-qE7mM7PuVd3q2fK37dleepwxjzmMb105wgFJz6uongLzC_5YcAAZGlTTX6BRht",
-  },
-  {
-    id: "2",
-    sku: "TV-LG-43-LM63",
-    name: 'LG 43" LM6370',
-    brand: "LG",
-    category: "Televisions",
-    price: 48500,
-    stock: 5,
-    stockStatus: "low-stock",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDnrbLQ9BNkxODfb4hYLgkPSmWFKj9MTOJ6RufP6zxYUZByQtylHlWJaylMHtrr36YBjVmIKg5_cC4P_YM8mhVDxVRZfmG9RE5BuDmcAt-SNjKeNfYasJGrVvPfwvOeuvh0KPQAmeKHs5fO5ZuhXnKTMRiz-6-bHhQeeNWG_5YnCpc6CwFc2feXQ3MIJMcsy16u0_d-iwBnwGq6HdUSPrN4g4SKy9ONsir1IusboGdJ6x8YPoj9TuIh5sIbIk6quliL-YL_g8WYT3OW",
-  },
-  {
-    id: "3",
-    sku: "TV-SON-65-X80",
-    name: 'Sony BRAVIA 65" X80L',
-    brand: "Sony",
-    category: "Televisions",
-    price: 145000,
-    stock: 12,
-    stockStatus: "in-stock",
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuArDsG0qYPB_ugVw5i3Mcx-nG02NcNo367dwEAnvVY39K0eUsHh4Q3sruW5kQU3BSR_SU0m0frfJF3qAAiAbone3QgPj1048D8gzxIMO_knItuZNNkgA79IVB7WXHB5w12TfU5fGILkP3N_WLlhjayGh5ijaeGbcCpuCPyynlY8BBRITdPHvQxAw277n2nuTA894sSD-s4PpyORlTb9H3SNlwz20TK7szCwmygVTc6p2O2SVGA47rwUqSOJPwMewaND18FIZUUSZTdd",
-  },
-  {
-    id: "4",
-    sku: "PH-APP-15P-256",
-    name: "iPhone 15 Pro 256GB",
-    brand: "Apple",
-    category: "Smartphones",
-    price: 185000,
-    stock: null,
-    stockStatus: "out-of-stock",
-    image: null,
-  },
-  {
-    id: "5",
-    sku: "LP-DEL-XPS-13",
-    name: "Dell XPS 13 9315",
-    brand: "Dell",
-    category: "Laptops",
-    price: 165000,
-    stock: 18,
-    stockStatus: "in-stock",
-    image: null,
-  },
-  {
-    id: "6",
-    sku: "AU-SNY-WH1K-M5",
-    name: "Sony WH-1000XM5",
-    brand: "Sony",
-    category: "Audio",
-    price: 42000,
-    stock: 32,
-    stockStatus: "in-stock",
-    image: null,
-  },
-  {
-    id: "7",
-    sku: "PH-SAM-S24U",
-    name: "Samsung Galaxy S24 Ultra",
-    brand: "Samsung",
-    category: "Smartphones",
-    price: 158500,
-    stock: 2,
-    stockStatus: "low-stock",
-    image: null,
-  },
-  {
-    id: "8",
-    sku: "LP-MAC-M3-14",
-    name: 'MacBook Pro 14" M3',
-    brand: "Apple",
-    category: "Laptops",
-    price: 265000,
-    stock: 8,
-    stockStatus: "in-stock",
-    image: null,
-  },
-  {
-    id: "9",
-    sku: "AU-APP-AIRP-PRO",
-    name: "Apple AirPods Pro (2nd)",
-    brand: "Apple",
-    category: "Audio",
-    price: 32500,
-    stock: 45,
-    stockStatus: "in-stock",
-    image: null,
-  },
-  {
-    id: "10",
-    sku: "PH-XIA-RED-13",
-    name: "Redmi Note 13 Pro",
-    brand: "Xiaomi",
-    category: "Smartphones",
-    price: 38000,
-    stock: 60,
-    stockStatus: "in-stock",
-    image: null,
-  },
-];
-
-const TOTAL_PRODUCTS = 248;
-const TOTAL_PAGES = 25;
+import { productsApi, ApiError, ProductResponseDto } from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StockCell({
-  product,
-}: {
-  product: Product;
-}) {
-  if (product.stockStatus === "out-of-stock") {
+function StockCell({ product }: { product: ProductResponseDto }) {
+  if (product.quantity <= 0) {
     return (
       <div className="flex items-center gap-2 text-error">
         <div className="w-2 h-2 rounded-full bg-error flex-shrink-0" />
@@ -155,18 +16,18 @@ function StockCell({
       </div>
     );
   }
-  if (product.stockStatus === "low-stock") {
+  if (product.quantity <= product.lowStockThreshold) {
     return (
       <div className="flex items-center gap-2 text-primary">
         <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />
-        <span className="text-body-reg">{product.stock} Units</span>
+        <span className="text-body-reg">{product.quantity} Units</span>
       </div>
     );
   }
   return (
     <div className="flex items-center gap-2 text-on-surface">
       <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
-      <span className="text-body-reg">{product.stock} Units</span>
+      <span className="text-body-reg">{product.quantity} Units</span>
     </div>
   );
 }
@@ -179,7 +40,7 @@ function CategoryBadge({ label }: { label: string }) {
   );
 }
 
-function ProductImage({ src, alt }: { src: string | null; alt: string }) {
+function ProductImage({ src, alt }: { src?: string; alt: string }) {
   if (src) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -197,32 +58,95 @@ function ProductImage({ src, alt }: { src: string | null; alt: string }) {
   );
 }
 
+const PAGE_SIZE = 10;
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toast = useToast();
+  const [products, setProducts] = useState<ProductResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
 
   // Filter state
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
-  const [brand, setBrand] = useState("");
   const [stockStatus, setStockStatus] = useState("");
 
-  // ── Selection helpers ──
-  const allSelected =
-    products.length > 0 && selectedIds.size === products.length;
-
-  function toggleAll() {
-    if (allSelected) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(products.map((p) => p.id)));
+  async function loadProducts() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await productsApi.list();
+      setProducts(data);
+    } catch (err) {
+      setLoadError(
+        err instanceof ApiError
+          ? `Failed to load products: ${err.message}`
+          : "Failed to load products. Check your connection to the server."
+      );
+    } finally {
+      setLoading(false);
     }
   }
 
-  function toggleRow(id: string) {
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  const categories = useMemo(
+    () =>
+      Array.from(
+        new Set(products.map((p) => p.categoryName).filter(Boolean) as string[])
+      ),
+    [products]
+  );
+
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      const matchesSearch =
+        search.trim() === "" ||
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.sku?.toLowerCase().includes(search.toLowerCase());
+      const matchesCategory = category === "" || p.categoryName === category;
+      const status =
+        p.quantity <= 0
+          ? "out-of-stock"
+          : p.quantity <= p.lowStockThreshold
+          ? "low-stock"
+          : "in-stock";
+      const matchesStatus = stockStatus === "" || status === stockStatus;
+      return matchesSearch && matchesCategory && matchesStatus;
+    });
+  }, [products, search, category, stockStatus]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  const pageProducts = filteredProducts.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
+
+  // ── Selection helpers ──
+  const allSelected =
+    pageProducts.length > 0 && pageProducts.every((p) => selectedIds.has(p.id));
+
+  function toggleAll() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        pageProducts.forEach((p) => next.delete(p.id));
+      } else {
+        pageProducts.forEach((p) => next.add(p.id));
+      }
+      return next;
+    });
+  }
+
+  function toggleRow(id: number) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -230,18 +154,31 @@ export default function ProductsPage() {
     });
   }
 
-  // ── Actions (stubs — wire to your API/server actions) ──
-  function handleDelete(id: string) {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  // ── Delete (real API call) ──
+  async function handleDelete(id: number, name: string) {
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    setDeletingId(id);
+    try {
+      await productsApi.remove(id);
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      toast.success(`"${name}" was deleted.`);
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? `Could not delete product: ${err.message}`
+          : "Could not delete product. Check your connection to the server.";
+      toast.error(message);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
-  // ── Pagination ──
-  const pageNumbers = [1, 2, 3, "...", TOTAL_PAGES];
+  const pageNumbers = Array.from({ length: totalPages }, (_, i) => i + 1);
 
   return (
     <>
@@ -267,24 +204,21 @@ export default function ProductsPage() {
             <span className="material-symbols-outlined text-[18px]">add</span>
             Add Product
           </Link>
-          <button className="bg-on-secondary-fixed-variant hover:bg-on-secondary-fixed text-on-primary px-4 py-2 rounded-sm shadow-sm transition-colors flex items-center gap-2 text-body-semibold">
-            <span className="material-symbols-outlined text-[18px]">
-              upload_file
-            </span>
-            Import CSV
-          </button>
-          <button className="bg-secondary-container hover:bg-secondary text-on-secondary-container hover:text-on-secondary px-4 py-2 rounded-sm shadow-sm transition-colors flex items-center gap-2 text-body-semibold">
-            <span className="material-symbols-outlined text-[18px]">
-              download
-            </span>
-            Export
-          </button>
         </div>
       </div>
 
+      {loadError && (
+        <div className="bg-error-container/20 border border-error text-error rounded p-3 mb-4 text-label-sm flex items-center justify-between">
+          <span>{loadError}</span>
+          <button onClick={loadProducts} className="font-bold underline">
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* ── Filters ── */}
       <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-lg p-[15px] mb-5 shadow-sm">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[15px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[15px]">
           {/* Search */}
           <div className="flex flex-col gap-1">
             <label className="text-label-sm font-body-semibold text-secondary">
@@ -294,7 +228,10 @@ export default function ProductsPage() {
               <input
                 type="text"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setCurrentPage(1);
+                }}
                 placeholder="Search by SKU or Name"
                 className="w-full border border-outline-variant/30 rounded-sm px-3 py-2 text-body-reg text-on-surface placeholder:text-secondary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
               />
@@ -311,32 +248,18 @@ export default function ProductsPage() {
             </label>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => {
+                setCategory(e.target.value);
+                setCurrentPage(1);
+              }}
               className="w-full border border-outline-variant/30 rounded-sm px-3 py-2 text-body-reg text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
             >
               <option value="">All Categories</option>
-              <option>Televisions</option>
-              <option>Smartphones</option>
-              <option>Laptops</option>
-              <option>Audio</option>
-            </select>
-          </div>
-
-          {/* Brand */}
-          <div className="flex flex-col gap-1">
-            <label className="text-label-sm font-body-semibold text-secondary">
-              Brand
-            </label>
-            <select
-              value={brand}
-              onChange={(e) => setBrand(e.target.value)}
-              className="w-full border border-outline-variant/30 rounded-sm px-3 py-2 text-body-reg text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-            >
-              <option value="">All Brands</option>
-              <option>Samsung</option>
-              <option>LG</option>
-              <option>Sony</option>
-              <option>Apple</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -347,7 +270,10 @@ export default function ProductsPage() {
             </label>
             <select
               value={stockStatus}
-              onChange={(e) => setStockStatus(e.target.value)}
+              onChange={(e) => {
+                setStockStatus(e.target.value);
+                setCurrentPage(1);
+              }}
               className="w-full border border-outline-variant/30 rounded-sm px-3 py-2 text-body-reg text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
             >
               <option value="">All Statuses</option>
@@ -386,138 +312,143 @@ export default function ProductsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/10">
-              {products.map((product, i) => {
-                const isSelected = selectedIds.has(product.id);
-                const isEven = i % 2 === 1;
-                return (
-                  <tr
-                    key={product.id}
-                    onClick={() => toggleRow(product.id)}
-                    className={[
-                      "hover:bg-surface-container transition-colors cursor-pointer",
-                      isEven ? "bg-surface-container-low" : "",
-                      isSelected ? "bg-secondary-container/10" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  >
-                    {/* Checkbox */}
-                    <td className="p-4" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleRow(product.id)}
-                        className="rounded border-outline-variant text-primary focus:ring-primary"
-                      />
-                    </td>
+              {loading && (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-secondary">
+                    Loading products…
+                  </td>
+                </tr>
+              )}
 
-                    {/* Image */}
-                    <td className="p-4">
-                      <ProductImage src={product.image} alt={product.name} />
-                    </td>
+              {!loading && pageProducts.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-secondary">
+                    No products match this filter.
+                  </td>
+                </tr>
+              )}
 
-                    {/* SKU */}
-                    <td className="p-4 text-label-sm text-secondary whitespace-nowrap">
-                      {product.sku}
-                    </td>
+              {!loading &&
+                pageProducts.map((product, i) => {
+                  const isSelected = selectedIds.has(product.id);
+                  const isEven = i % 2 === 1;
+                  return (
+                    <tr
+                      key={product.id}
+                      onClick={() => toggleRow(product.id)}
+                      className={[
+                        "hover:bg-surface-container transition-colors cursor-pointer",
+                        isEven ? "bg-surface-container-low" : "",
+                        isSelected ? "bg-secondary-container/10" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
+                      {/* Checkbox */}
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleRow(product.id)}
+                          className="rounded border-outline-variant text-primary focus:ring-primary"
+                        />
+                      </td>
 
-                    {/* Product Details */}
-                    <td className="p-4">
-                      <div className="flex flex-col">
+                      {/* Image */}
+                      <td className="p-4">
+                        <ProductImage src={product.imageUrl} alt={product.name} />
+                      </td>
+
+                      {/* SKU */}
+                      <td className="p-4 text-label-sm text-secondary whitespace-nowrap">
+                        {product.sku}
+                      </td>
+
+                      {/* Product Details */}
+                      <td className="p-4">
                         <span className="text-body-semibold text-on-surface">
                           {product.name}
                         </span>
-                        <span className="text-label-sm text-secondary">
-                          {product.brand}
-                        </span>
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Category */}
-                    <td className="p-4">
-                      <CategoryBadge label={product.category} />
-                    </td>
+                      {/* Category */}
+                      <td className="p-4">
+                        <CategoryBadge label={product.categoryName ?? "Uncategorized"} />
+                      </td>
 
-                    {/* Price */}
-                    <td className="p-4 text-body-semibold text-primary whitespace-nowrap">
-                      KES {product.price.toLocaleString()}
-                    </td>
+                      {/* Price */}
+                      <td className="p-4 text-body-semibold text-primary whitespace-nowrap">
+                        KES {product.price.toLocaleString()}
+                      </td>
 
-                    {/* Stock */}
-                    <td className="p-4">
-                      <StockCell product={product} />
-                    </td>
+                      {/* Stock */}
+                      <td className="p-4">
+                        <StockCell product={product} />
+                      </td>
 
-                    {/* Actions */}
-                    <td
-                      className="p-4"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center gap-1">
-                        <Link
-                          href={`/products/${product.id}/edit`}
-                          className="p-1.5 hover:bg-primary-container/10 text-secondary hover:text-primary transition-colors rounded-sm"
-                          aria-label={`Edit ${product.name}`}
-                        >
-                          <span className="material-symbols-outlined text-[20px]">
-                            edit
-                          </span>
-                        </Link>
-                        <button
-                          onClick={() => handleDelete(product.id)}
-                          className="p-1.5 hover:bg-error-container/20 text-secondary hover:text-error transition-colors rounded-sm"
-                          aria-label={`Delete ${product.name}`}
-                        >
-                          <span className="material-symbols-outlined text-[20px]">
-                            delete
-                          </span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                      {/* Actions */}
+                      <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <Link
+                            href={`/products/${product.id}/edit`}
+                            className="p-1.5 hover:bg-primary-container/10 text-secondary hover:text-primary transition-colors rounded-sm"
+                            aria-label={`Edit ${product.name}`}
+                          >
+                            <span className="material-symbols-outlined text-[20px]">
+                              edit
+                            </span>
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(product.id, product.name)}
+                            disabled={deletingId === product.id}
+                            className="p-1.5 hover:bg-error-container/20 text-secondary hover:text-error transition-colors rounded-sm disabled:opacity-40"
+                            aria-label={`Delete ${product.name}`}
+                          >
+                            <span className="material-symbols-outlined text-[20px]">
+                              {deletingId === product.id ? "hourglass_empty" : "delete"}
+                            </span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
 
         {/* ── Pagination Footer ── */}
-        <div className="px-4 py-3 flex items-center justify-between border-t border-outline-variant/10 flex-wrap gap-3">
-          <p className="text-label-sm text-secondary">
-            Showing{" "}
-            <span className="font-bold text-on-surface">
-              {(currentPage - 1) * 10 + 1} –{" "}
-              {Math.min(currentPage * 10, TOTAL_PRODUCTS)}
-            </span>{" "}
-            of{" "}
-            <span className="font-bold text-on-surface">{TOTAL_PRODUCTS}</span>{" "}
-            products
-          </p>
+        {!loading && filteredProducts.length > 0 && (
+          <div className="px-4 py-3 flex items-center justify-between border-t border-outline-variant/10 flex-wrap gap-3">
+            <p className="text-label-sm text-secondary">
+              Showing{" "}
+              <span className="font-bold text-on-surface">
+                {(currentPage - 1) * PAGE_SIZE + 1} –{" "}
+                {Math.min(currentPage * PAGE_SIZE, filteredProducts.length)}
+              </span>{" "}
+              of{" "}
+              <span className="font-bold text-on-surface">
+                {filteredProducts.length}
+              </span>{" "}
+              products
+            </p>
 
-          <div className="flex gap-1">
-            <button
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-              className="p-2 border border-outline-variant/20 rounded-sm hover:bg-surface-container text-secondary transition-colors disabled:opacity-40"
-              aria-label="Previous page"
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                chevron_left
-              </span>
-            </button>
-
-            {pageNumbers.map((page, i) =>
-              page === "..." ? (
-                <span
-                  key={`ellipsis-${i}`}
-                  className="px-3 py-1 border border-outline-variant/20 rounded-sm text-label-sm text-secondary flex items-center"
-                >
-                  ...
+            <div className="flex gap-1">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="p-2 border border-outline-variant/20 rounded-sm hover:bg-surface-container text-secondary transition-colors disabled:opacity-40"
+                aria-label="Previous page"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  chevron_left
                 </span>
-              ) : (
+              </button>
+
+              {pageNumbers.map((page) => (
                 <button
                   key={page}
-                  onClick={() => setCurrentPage(Number(page))}
+                  onClick={() => setCurrentPage(page)}
                   className={[
                     "px-3 py-1 border rounded-sm text-label-sm transition-colors",
                     currentPage === page
@@ -527,23 +458,21 @@ export default function ProductsPage() {
                 >
                   {page}
                 </button>
-              )
-            )}
+              ))}
 
-            <button
-              onClick={() =>
-                setCurrentPage((p) => Math.min(TOTAL_PAGES, p + 1))
-              }
-              disabled={currentPage === TOTAL_PAGES}
-              className="p-2 border border-outline-variant/20 rounded-sm hover:bg-surface-container text-secondary transition-colors disabled:opacity-40"
-              aria-label="Next page"
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                chevron_right
-              </span>
-            </button>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="p-2 border border-outline-variant/20 rounded-sm hover:bg-surface-container text-secondary transition-colors disabled:opacity-40"
+                aria-label="Next page"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  chevron_right
+                </span>
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </>
   );
