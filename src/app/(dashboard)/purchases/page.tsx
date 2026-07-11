@@ -1,89 +1,163 @@
-import Image from "next/image";
+// src/app/(dashboard)/purchases/page.tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Avatar from "@/components/ui/Avatar";
 import StatBanner from "@/components/ui/StatBanner";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import PanelCard from "@/components/ui/PanelCard";
-import Badge from "@/components/ui/Badge";
+import {
+  purchaseOrdersApi,
+  suppliersApi,
+  ApiError,
+  PurchaseOrderResponseDto,
+  SupplierResponseDto,
+} from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 
-interface PurchaseOrder {
-  poNumber: string;
-  supplier: string;
-  supplierInitial: string;
-  supplierBg: string;
-  supplierText: string;
-  items: string;
-  totalCost: string;
-  status: "Received" | "Ordered" | "Partial";
-  actions: string[];
+const AVATAR_PALETTE = [
+  { bg: "bg-blue-100", text: "text-blue-700" },
+  { bg: "bg-red-100", text: "text-red-700" },
+  { bg: "bg-purple-100", text: "text-purple-700" },
+  { bg: "bg-yellow-100", text: "text-yellow-700" },
+  { bg: "bg-gray-200", text: "text-gray-700" },
+  { bg: "bg-green-100", text: "text-green-700" },
+  { bg: "bg-cyan-100", text: "text-cyan-700" },
+];
+
+function colorFor(name: string) {
+  const hash = name.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
-const ORDERS: PurchaseOrder[] = [
-  { poNumber: "PO-2024-001", supplier: "Samsung Electronics", supplierInitial: "S", supplierBg: "bg-blue-100", supplierText: "text-blue-700", items: "12x Galaxy S24 Ultra, 5x Tabs", totalCost: "1,450,000", status: "Received", actions: ["visibility", "print", "more_vert"] },
-  { poNumber: "PO-2024-002", supplier: "Yamaha Music Shop", supplierInitial: "Y", supplierBg: "bg-red-100", supplierText: "text-red-700", items: "2x Digital Pianos, 10x Monitors", totalCost: "825,000", status: "Ordered", actions: ["visibility", "edit", "more_vert"] },
-  { poNumber: "PO-2024-003", supplier: "Apple Global Distribution", supplierInitial: "A", supplierBg: "bg-purple-100", supplierText: "text-purple-700", items: "20x iPhone 15 Pro Max", totalCost: "3,200,000", status: "Partial", actions: ["visibility", "inventory_2", "more_vert"] },
-  { poNumber: "PO-2024-004", supplier: "Logitech Solutions", supplierInitial: "L", supplierBg: "bg-yellow-100", supplierText: "text-yellow-700", items: "50x MX Master 3S", totalCost: "450,000", status: "Received", actions: ["visibility", "print", "more_vert"] },
-  { poNumber: "PO-2024-005", supplier: "Dell Technologies", supplierInitial: "D", supplierBg: "bg-gray-200", supplierText: "text-gray-700", items: "5x XPS 15 Laptops", totalCost: "1,125,000", status: "Ordered", actions: ["visibility", "edit", "more_vert"] },
-];
-
-const STATUS_BADGE: Record<PurchaseOrder["status"], "green" | "amber" | "blue"> = {
-  Received: "green",
-  Ordered: "amber",
-  Partial: "blue",
+const STATUS_STYLE: Record<string, { badge: string; border: string }> = {
+  RECEIVED: { badge: "bg-green-100 text-green-700", border: "border-green-200" },
+  ORDERED: { badge: "bg-orange-100 text-orange-700", border: "border-orange-200" },
+  PARTIAL: { badge: "bg-blue-100 text-blue-700", border: "border-blue-200" },
 };
 
-const STATUS_BORDER: Record<PurchaseOrder["status"], string> = {
-  Received: "border-green-200",
-  Ordered: "border-orange-200",
-  Partial: "border-blue-200",
-};
+function statusLabel(status: string) {
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}
 
-const SUPPLIERS = [
-  { name: "Samsung Service", email: "supply@samsung.com", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCP3BtW2SMSVJpMcZYXLDeSuQpjNGa8cJz67UDZrGLX2LRcaqdSR_M8lPVG5MjeVY5g3apZEkjG7ZQ_JRQCyk_srf_VB1OkbEn17RdIEQtKWjFq5xC4a3-KDkTfmFA1kn0hPw2fXiIm38OC-bUe0jNgqzk82QxbyuKiEzOQ9SCxcFEMW8B9A3zleGPAK1SNVwfMSGdI0HdSuuFZingl_j7GDAo3vkHK7zW3CXWxyoDX-orJZdqdBQo8nAPgy9-u7P2rFh8XXWcJ-ICN" },
-  { name: "Yamaha Music", email: "orders@yamaha.co.jp", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCeuqWsAynkNKErZEsd-yt0kmFmSA9o7sSW4jyQTX36pNVX7iNcXyjzdIVA1u78rqmkVZPODztoD9xjui-GxKbQLhRpct6Y092vym-Ry8is_9ovGQC13fYT4F1sS18wyU72c18eE9zQ6NmD__DwG70G4s6bgrsDTe2gLQL06p4zzZJWpGbqhlI5BUOvCBLyRM7gdqTlkqCh4CckCKJrHD4MvQXgdlEHsKkuZ2T2ApyIEjjHooJWYtlNY4yoekP69AzPFMpJpNhz9gy2" },
-];
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
 
 export default function PurchasesPage() {
-  const columns: Column<PurchaseOrder>[] = [
-    { header: "PO Number", render: (o) => <span className="font-body-semibold">{o.poNumber}</span> },
+  const toast = useToast();
+  const [orders, setOrders] = useState<PurchaseOrderResponseDto[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const [o, s] = await Promise.all([purchaseOrdersApi.list(), suppliersApi.list()]);
+      setOrders(o);
+      setSuppliers(s);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load purchase orders.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const totalOrders = orders.length;
+  const pendingCount = orders.filter((o) => o.status?.toUpperCase() === "ORDERED").length;
+  const receivedCount = orders.filter((o) => o.status?.toUpperCase() === "RECEIVED").length;
+  const avgOrderValue = orders.length
+    ? orders.reduce((sum, o) => sum + o.totalAmount, 0) / orders.length
+    : 0;
+
+  async function handleReceive(o: PurchaseOrderResponseDto) {
+    if (o.status?.toUpperCase() === "RECEIVED") return;
+    if (!confirm(`Mark PO #${o.id} as received? This should update stock levels.`)) return;
+    try {
+      await purchaseOrdersApi.receive(o.id);
+      toast.success(`PO #${o.id} marked as received.`);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not update purchase order.");
+    }
+  }
+
+  const monthlySpend = useMemo(() => {
+    const months: { label: string; total: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const label = d.toLocaleDateString("en-US", { month: "short" });
+      const monthKey = d.toISOString().slice(0, 7);
+      const total = orders
+        .filter((o) => o.orderDate.slice(0, 7) === monthKey)
+        .reduce((sum, o) => sum + o.totalAmount, 0);
+      months.push({ label, total });
+    }
+    const max = Math.max(...months.map((m) => m.total), 1);
+    return months.map((m) => ({ ...m, pct: Math.round((m.total / max) * 100) || 2 }));
+  }, [orders]);
+
+  const columns: Column<PurchaseOrderResponseDto>[] = [
+    { header: "PO Number", render: (o) => <span className="font-body-semibold">PO-{String(o.id).padStart(4, "0")}</span> },
     {
       header: "Supplier",
-      render: (o) => (
-        <div className="flex items-center gap-2">
-          <div className={`w-6 h-6 rounded-full ${o.supplierBg} flex items-center justify-center text-[10px] ${o.supplierText} font-bold`}>
-            {o.supplierInitial}
+      render: (o) => {
+        const c = colorFor(o.supplierName);
+        return (
+          <div className="flex items-center gap-2">
+            <div className={`w-6 h-6 rounded-full ${c.bg} flex items-center justify-center text-[10px] ${c.text} font-bold`}>
+              {o.supplierName?.[0]?.toUpperCase() ?? "?"}
+            </div>
+            {o.supplierName}
           </div>
-          {o.supplier}
-        </div>
-      ),
+        );
+      },
     },
-    { header: "Items", render: (o) => o.items },
-    { header: "Total Cost (KES)", render: (o) => <span className="font-mono">{o.totalCost}</span> },
+    {
+      header: "Items",
+      render: (o) => o.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ") || "—",
+    },
+    { header: "Total Cost (KES)", render: (o) => <span className="font-mono">{o.totalAmount.toLocaleString()}</span> },
     {
       header: "Status",
       align: "center",
-      render: (o) => (
-        <span
-          className={`${
-            STATUS_BADGE[o.status] === "green"
-              ? "bg-green-100 text-green-700"
-              : STATUS_BADGE[o.status] === "amber"
-              ? "bg-orange-100 text-orange-700"
-              : "bg-blue-100 text-blue-700"
-          } text-[11px] font-bold px-2 py-0.5 rounded uppercase border ${STATUS_BORDER[o.status]}`}
-        >
-          {o.status}
-        </span>
-      ),
+      render: (o) => {
+        const key = o.status?.toUpperCase() ?? "";
+        const style = STATUS_STYLE[key] ?? { badge: "bg-gray-100 text-gray-700", border: "border-gray-200" };
+        return (
+          <span className={`${style.badge} text-[11px] font-bold px-2 py-0.5 rounded uppercase border ${style.border}`}>
+            {statusLabel(o.status ?? "Unknown")}
+          </span>
+        );
+      },
     },
     {
       header: "Actions",
       align: "right",
       render: (o) => (
         <div className="flex justify-end gap-2">
-          {o.actions.map((icon) => (
-            <button key={icon} className="text-secondary hover:text-primary transition-colors">
-              <span className="material-symbols-outlined text-[20px]">{icon}</span>
-            </button>
-          ))}
+          <button className="text-secondary hover:text-primary transition-colors" title="View">
+            <span className="material-symbols-outlined text-[20px]">visibility</span>
+          </button>
+          <button
+            onClick={() => handleReceive(o)}
+            disabled={o.status?.toUpperCase() === "RECEIVED"}
+            className={`transition-colors ${
+              o.status?.toUpperCase() === "RECEIVED"
+                ? "text-secondary opacity-30 cursor-default"
+                : "text-secondary hover:text-primary"
+            }`}
+            title={o.status?.toUpperCase() === "RECEIVED" ? "Already received" : "Mark received"}
+          >
+            <span className="material-symbols-outlined text-[20px]">inventory_2</span>
+          </button>
         </div>
       ),
     },
@@ -104,11 +178,21 @@ export default function PurchasesPage() {
         </button>
       </div>
 
+      {error && (
+        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-[15px]">
-        <StatBanner value="148" label="Total Orders" icon="shopping_basket" bgColor="bg-blue-600" footerText="View all" />
-        <StatBanner value="12" label="Pending" icon="pending_actions" bgColor="bg-orange-500" footerText="Needs attention" />
-        <StatBanner value="124" label="Received" icon="verified" bgColor="bg-green-600" footerText="In stock" />
-        <StatBanner value="2" label="Overdue" icon="emergency_home" bgColor="bg-red-600" footerText="Contact suppliers" />
+        <StatBanner value={totalOrders.toString()} label="Total Orders" icon="shopping_basket" bgColor="bg-blue-600" footerText="" />
+        <StatBanner value={pendingCount.toString()} label="Pending" icon="pending_actions" bgColor="bg-orange-500" footerText="Needs attention" />
+        <StatBanner value={receivedCount.toString()} label="Received" icon="verified" bgColor="bg-green-600" footerText="In stock" />
+        <StatBanner
+          value={`KES ${Math.round(avgOrderValue).toLocaleString()}`}
+          label="Avg Order Value"
+          icon="query_stats"
+          bgColor="bg-red-600"
+          footerText=""
+        />
       </div>
 
       <PanelCard
@@ -125,21 +209,20 @@ export default function PurchasesPage() {
           </div>
         }
       >
-        <DataTable columns={columns} rows={ORDERS} rowKey={(o) => o.poNumber} />
-        <div className="px-[15px] py-[10px] bg-[#F4F4F4] border-t border-[#EEEEEE] flex justify-between items-center">
-          <span className="text-label-sm font-label-sm text-secondary">Showing 5 of 148 entries</span>
-          <div className="flex items-center gap-1">
-            <button className="w-8 h-8 flex items-center justify-center bg-white border border-outline-variant/20 rounded hover:bg-surface">
-              <span className="material-symbols-outlined text-[16px]">chevron_left</span>
-            </button>
-            <button className="w-8 h-8 flex items-center justify-center bg-primary text-on-primary rounded font-bold text-label-sm">1</button>
-            <button className="w-8 h-8 flex items-center justify-center bg-white border border-outline-variant/20 rounded hover:bg-surface text-label-sm">2</button>
-            <button className="w-8 h-8 flex items-center justify-center bg-white border border-outline-variant/20 rounded hover:bg-surface text-label-sm">3</button>
-            <button className="w-8 h-8 flex items-center justify-center bg-white border border-outline-variant/20 rounded hover:bg-surface">
-              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-            </button>
-          </div>
-        </div>
+        {loading ? (
+          <p className="p-6 text-center text-secondary">Loading purchase orders…</p>
+        ) : orders.length === 0 ? (
+          <p className="p-6 text-center text-secondary">No purchase orders yet.</p>
+        ) : (
+          <>
+            <DataTable columns={columns} rows={orders} rowKey={(o) => String(o.id)} />
+            <div className="px-[15px] py-[10px] bg-[#F4F4F4] border-t border-[#EEEEEE] flex justify-between items-center">
+              <span className="text-label-sm font-label-sm text-secondary">
+                Showing {orders.length} of {orders.length} entries
+              </span>
+            </div>
+          </>
+        )}
       </PanelCard>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-[15px]">
@@ -148,14 +231,19 @@ export default function PurchasesPage() {
             <span className="material-symbols-outlined text-primary">analytics</span>
             Recent Expenditure Trend
           </h3>
-          <div className="h-48 w-full bg-surface-container relative rounded overflow-hidden">
-            <svg className="w-full h-full" viewBox="0 0 400 100">
-              <path d="M0 80 Q 50 70, 100 85 T 200 40 T 300 60 T 400 20" fill="none" stroke="#b32200" strokeWidth="2" />
-              <path d="M0 80 Q 50 70, 100 85 T 200 40 T 300 60 T 400 20 V 100 H 0 Z" fill="rgba(179, 34, 0, 0.05)" />
-            </svg>
-            <div className="absolute inset-0 flex justify-between items-end px-4 pb-2 text-[10px] text-secondary/60">
-              <span>JAN</span><span>FEB</span><span>MAR</span><span>APR</span><span>MAY</span><span>JUN</span>
-            </div>
+          <div className="h-48 w-full flex items-end justify-between gap-3 px-2">
+            {monthlySpend.map((m) => (
+              <div key={m.label} className="flex-1 flex flex-col items-center gap-1 group">
+                <span className="text-[10px] text-secondary opacity-0 group-hover:opacity-100 transition-opacity">
+                  KES {Math.round(m.total).toLocaleString()}
+                </span>
+                <div
+                  className="w-full bg-primary/70 hover:bg-primary transition-colors rounded-t"
+                  style={{ height: `${m.pct}%`, minHeight: "4px" }}
+                />
+                <span className="text-[10px] text-secondary/60">{m.label.toUpperCase()}</span>
+              </div>
+            ))}
           </div>
         </div>
         <div className="bg-white p-[15px] border border-[#EEEEEE] rounded">
@@ -164,13 +252,13 @@ export default function PurchasesPage() {
             Quick Supplier Contact
           </h3>
           <div className="space-y-3">
-            {SUPPLIERS.map((s) => (
-              <div key={s.name} className="flex items-center justify-between group cursor-pointer hover:bg-surface transition-colors p-1 rounded">
+            {suppliers.slice(0, 3).map((s) => (
+              <div key={s.id} className="flex items-center justify-between group cursor-pointer hover:bg-surface transition-colors p-1 rounded">
                 <div className="flex items-center gap-2">
-                  <Image alt={s.name} src={s.img} width={32} height={32} className="rounded object-cover" />
+                  <Avatar initials={s.name?.[0]?.toUpperCase() ?? "?"} bgColor={colorFor(s.name).bg} textColor={colorFor(s.name).text} />
                   <div>
                     <p className="text-body-semibold text-on-surface">{s.name}</p>
-                    <p className="text-[11px] text-secondary">{s.email}</p>
+                    <p className="text-[11px] text-secondary">{s.email || s.phone || "—"}</p>
                   </div>
                 </div>
                 <span className="material-symbols-outlined text-secondary opacity-0 group-hover:opacity-100 transition-opacity">
@@ -178,10 +266,10 @@ export default function PurchasesPage() {
                 </span>
               </div>
             ))}
+            {suppliers.length === 0 && !loading && (
+              <p className="text-label-sm text-secondary">No suppliers registered yet.</p>
+            )}
           </div>
-          <button className="w-full mt-4 py-2 border border-dashed border-outline-variant text-secondary text-label-sm rounded hover:bg-surface transition-all">
-            + Add New Supplier
-          </button>
         </div>
       </div>
     </div>

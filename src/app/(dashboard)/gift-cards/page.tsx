@@ -1,38 +1,71 @@
+// src/app/(dashboard)/gift-cards/page.tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import StatBanner from "@/components/ui/StatBanner";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import PanelCard from "@/components/ui/PanelCard";
+import { giftCardsApi, ApiError, GiftCardResponseDto } from "@/lib/api";
+import { useToast } from "@/context/ToastContext";
 
-interface GiftCard {
-  code: string;
-  issuedTo: string;
-  balance: string;
-  status: "Active" | "Redeemed" | "Expired";
-  actions: { icon: string; danger?: boolean }[];
-}
-
-const CARDS: GiftCard[] = [
-  { code: "GFT-8821-X90", issuedTo: "Michael Anderson", balance: "$500.00", status: "Active", actions: [{ icon: "edit" }, { icon: "block", danger: true }] },
-  { code: "GFT-1120-L42", issuedTo: "Sarah Jenkins", balance: "$0.00", status: "Redeemed", actions: [{ icon: "visibility" }, { icon: "delete", danger: true }] },
-  { code: "GFT-3094-P11", issuedTo: "David Thompson", balance: "$125.50", status: "Expired", actions: [{ icon: "refresh" }, { icon: "delete", danger: true }] },
-  { code: "GFT-4429-W22", issuedTo: "Linda Richards", balance: "$75.00", status: "Active", actions: [{ icon: "edit" }, { icon: "block", danger: true }] },
-];
-
-const STATUS_STYLE: Record<GiftCard["status"], string> = {
-  Active: "bg-green-100 text-green-800",
-  Redeemed: "bg-secondary-container text-on-secondary-container",
-  Expired: "bg-error-container text-on-error-container",
+const STATUS_STYLE: Record<string, string> = {
+  ACTIVE: "bg-green-100 text-green-800",
+  REDEEMED: "bg-secondary-container text-on-secondary-container",
+  EXPIRED: "bg-error-container text-on-error-container",
 };
 
+function statusLabel(status: string) {
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}
+
 export default function GiftCardsPage() {
-  const columns: Column<GiftCard>[] = [
+  const toast = useToast();
+  const [cards, setCards] = useState<GiftCardResponseDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      setCards(await giftCardsApi.list());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load gift cards.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const activeCount = cards.filter((c) => c.status?.toUpperCase() === "ACTIVE").length;
+  const totalIssued = cards.reduce((sum, c) => sum + c.initialValue, 0);
+  const totalRedeemed = cards.reduce((sum, c) => sum + (c.initialValue - c.currentBalance), 0);
+
+  async function handleRedeem(c: GiftCardResponseDto) {
+    if (c.status?.toUpperCase() !== "ACTIVE") return;
+    if (!confirm(`Redeem gift card ${c.code}? This will draw down its balance.`)) return;
+    try {
+      await giftCardsApi.redeem(c.code);
+      toast.success(`Gift card ${c.code} redeemed.`);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not redeem gift card.");
+    }
+  }
+
+  const columns: Column<GiftCardResponseDto>[] = [
     { header: "Card Code", render: (c) => <span className="font-mono font-bold text-primary">{c.code}</span> },
-    { header: "Issued To", render: (c) => c.issuedTo },
-    { header: "Balance", render: (c) => c.balance },
+    { header: "Initial Value", render: (c) => `KES ${c.initialValue.toLocaleString()}` },
+    { header: "Balance", render: (c) => `KES ${c.currentBalance.toLocaleString()}` },
+    { header: "Expiry Date", render: (c) => new Date(c.expiryDate).toLocaleDateString() },
     {
       header: "Status",
       render: (c) => (
-        <span className={`px-2 py-0.5 rounded-full ${STATUS_STYLE[c.status]} text-[11px] font-bold uppercase tracking-tighter`}>
-          {c.status}
+        <span className={`px-2 py-0.5 rounded-full ${STATUS_STYLE[c.status?.toUpperCase() ?? ""] ?? "bg-gray-100 text-gray-700"} text-[11px] font-bold uppercase tracking-tighter`}>
+          {statusLabel(c.status ?? "Unknown")}
         </span>
       ),
     },
@@ -41,11 +74,16 @@ export default function GiftCardsPage() {
       align: "right",
       render: (c) => (
         <div className="flex justify-end gap-2">
-          {c.actions.map((a, i) => (
-            <button key={i} className={`p-1 text-secondary ${a.danger ? "hover:text-error" : "hover:text-primary"}`}>
-              <span className="material-symbols-outlined text-[18px]">{a.icon}</span>
-            </button>
-          ))}
+          <button
+            onClick={() => handleRedeem(c)}
+            disabled={c.status?.toUpperCase() !== "ACTIVE"}
+            className={`p-1 transition-colors ${
+              c.status?.toUpperCase() === "ACTIVE" ? "text-secondary hover:text-primary" : "text-secondary opacity-30 cursor-default"
+            }`}
+            title={c.status?.toUpperCase() === "ACTIVE" ? "Redeem" : "Not redeemable"}
+          >
+            <span className="material-symbols-outlined text-[18px]">redeem</span>
+          </button>
         </div>
       ),
     },
@@ -66,24 +104,31 @@ export default function GiftCardsPage() {
         </button>
       </div>
 
+      {error && (
+        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-[15px]">
-        <StatBanner value="1,284" label="Active Cards" icon="credit_card" bgColor="bg-[#3498db]" footerText="More Info" />
-        <StatBanner value="$45,200.00" label="Total Value Issued" icon="payments" bgColor="bg-[#2ecc71]" footerText="Detailed Report" />
-        <StatBanner value="$12,840.50" label="Redeemed Value" icon="shopping_bag" bgColor="bg-[#f39c12]" footerText="Redemption History" />
+        <StatBanner value={`${activeCount}`} label="Active Cards" icon="credit_card" bgColor="bg-[#3498db]" footerText="" />
+        <StatBanner value={`KES ${totalIssued.toLocaleString()}`} label="Total Value Issued" icon="payments" bgColor="bg-[#2ecc71]" footerText="" />
+        <StatBanner value={`KES ${totalRedeemed.toLocaleString()}`} label="Redeemed Value" icon="shopping_bag" bgColor="bg-[#f39c12]" footerText="" />
       </div>
 
       <PanelCard title="Gift Card Inventory" icon="list">
-        <DataTable columns={columns} rows={CARDS} rowKey={(c) => c.code} />
-        <div className="p-4 bg-[#F4F4F4] border-t border-[#EEEEEE] flex justify-between items-center">
-          <span className="text-label-sm font-label-sm text-secondary">Showing 4 of 244 entries</span>
-          <div className="flex gap-1">
-            <button className="px-2 py-1 bg-white border border-[#DDD] text-label-sm hover:bg-surface-container">Previous</button>
-            <button className="px-3 py-1 bg-primary text-on-primary text-label-sm">1</button>
-            <button className="px-3 py-1 bg-white border border-[#DDD] text-label-sm hover:bg-surface-container">2</button>
-            <button className="px-3 py-1 bg-white border border-[#DDD] text-label-sm hover:bg-surface-container">3</button>
-            <button className="px-2 py-1 bg-white border border-[#DDD] text-label-sm hover:bg-surface-container">Next</button>
-          </div>
-        </div>
+        {loading ? (
+          <p className="p-6 text-center text-secondary">Loading gift cards…</p>
+        ) : cards.length === 0 ? (
+          <p className="p-6 text-center text-secondary">No gift cards issued yet.</p>
+        ) : (
+          <>
+            <DataTable columns={columns} rows={cards} rowKey={(c) => c.code} />
+            <div className="p-4 bg-[#F4F4F4] border-t border-[#EEEEEE] flex justify-between items-center">
+              <span className="text-label-sm font-label-sm text-secondary">
+                Showing {cards.length} of {cards.length} entries
+              </span>
+            </div>
+          </>
+        )}
       </PanelCard>
     </div>
   );

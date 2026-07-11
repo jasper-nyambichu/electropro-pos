@@ -234,6 +234,20 @@ export interface QuotationResponseDto {
   items: QuotationItemResponseDto[];
   convertedSaleId?: number;
 }
+export interface SettingsDto {
+  businessName: string;
+  kraPin: string;
+  address: string;
+  currency: string;
+  timezone: string;
+  receiptHeaderText: string;
+  receiptFooterText: string;
+  autoGenerateSerialNumbers: boolean;
+  thermalPrinterMode: boolean;
+}
+export interface SettingsResponseDto extends SettingsDto {
+  id: number;
+}
 
 // ─── Products ──────────────────────────────────────────────────────────────
 
@@ -364,4 +378,11 @@ export const reportsApi = {
   daily: () => get<SaleResponseDto[]>("/reports/daily"),
   category: () => get<CategoryResponseDto[]>("/reports/category"),
   stock: () => get<ProductResponseDto[]>("/reports/stock"),
+};
+
+// ─── Settings ──────────────────────────────────────────────────────────────
+
+export const settingsApi = {
+  get: () => get<SettingsResponseDto>("/settings"),
+  update: (dto: SettingsDto) => put<SettingsResponseDto>("/settings", dto),
 };
