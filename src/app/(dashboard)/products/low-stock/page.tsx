@@ -1,191 +1,126 @@
-// src/app/(dashboard)/products/low-stock/page.tsx
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import DataTable, { Column } from "@/components/ui/DataTable";
-import PanelCard from "@/components/ui/PanelCard";
-import Pagination from "@/components/ui/Pagination";
-import {
-  productsApi,
-  purchaseOrdersApi,
-  ApiError,
-  ProductResponseDto,
-} from "@/lib/api";
-
-type Status = "Critical" | "Low Stock" | "Out of Stock";
-
-interface StockRow extends ProductResponseDto {
-  status: Status;
-}
-
-const STATUS_STYLES: Record<Status, { badge: string; stock: string }> = {
-  Critical: {
-    badge: "bg-[#ffdad6] text-[#ba1a1a] px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider",
-    stock: "text-[#E8401C] font-bold",
-  },
-  "Low Stock": {
-    badge: "bg-[#FFF4E5] text-[#663C00] border border-[#FFD599] px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider",
-    stock: "text-[#B72300] font-bold",
-  },
-  "Out of Stock": {
-    badge: "bg-black text-white px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider",
-    stock: "text-[#ba1a1a] font-bold",
-  },
-};
-
-function classify(quantity: number, threshold: number): Status {
-  if (quantity <= 0) return "Out of Stock";
-  if (quantity <= threshold / 2) return "Critical";
-  return "Low Stock";
-}
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { productApi, type ProductResponse } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
+import TableSkeleton from '@/components/ui/TableSkeleton';
+import EmptyState from '@/components/ui/EmptyState';
 
 export default function LowStockPage() {
-  const [products, setProducts] = useState<ProductResponseDto[]>([]);
-  const [pendingOrders, setPendingOrders] = useState(0);
+  const router = useRouter();
+  const { error } = useToast();
+  const [products, setProducts] = useState<ProductResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([productsApi.lowStock(), purchaseOrdersApi.list()])
-      .then(([lowStock, orders]) => {
-        setProducts(lowStock);
-        setPendingOrders(orders.filter((o) => o.status?.toUpperCase() !== "RECEIVED").length);
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load low stock items."))
+    productApi.getLowStock()
+      .then(setProducts)
+      .catch((err: unknown) => error('Failed to load', err instanceof Error ? err.message : undefined))
       .finally(() => setLoading(false));
   }, []);
 
-  const rows: StockRow[] = useMemo(
-    () => products.map((p) => ({ ...p, status: classify(p.quantity, p.lowStockThreshold) })),
-    [products]
-  );
-
-  const restockValueNeeded = useMemo(
-    () =>
-      rows.reduce((sum, p) => {
-        const deficit = Math.max(p.lowStockThreshold - p.quantity, 0);
-        return sum + deficit * p.price;
-      }, 0),
-    [rows]
-  );
-
-  const columns: Column<StockRow>[] = [
-    {
-      header: "Product",
-      render: (item) => (
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-surface-container flex items-center justify-center rounded overflow-hidden border border-outline-variant/10 flex-shrink-0">
-            <span className="material-symbols-outlined text-secondary text-[20px]">inventory_2</span>
-          </div>
-          <span className="font-body-semibold">{item.name}</span>
-        </div>
-      ),
-    },
-    { header: "SKU", render: (item) => <span className="font-mono text-[12px] text-secondary">{item.sku}</span> },
-    { header: "Category", render: (item) => <span className="text-secondary">{item.categoryName ?? "Uncategorized"}</span> },
-    {
-      header: "Stock",
-      align: "center",
-      render: (item) => <span className={STATUS_STYLES[item.status].stock}>{item.quantity}</span>,
-    },
-    { header: "Threshold", align: "center", render: (item) => <span className="text-secondary">{item.lowStockThreshold}</span> },
-    {
-      header: "Status",
-      render: (item) => <span className={STATUS_STYLES[item.status].badge}>{item.status}</span>,
-    },
-    {
-      header: "Actions",
-      align: "right",
-      render: (item) => (
-        <button
-          className={`text-xs font-bold py-1.5 px-3 rounded hover:opacity-90 transition-opacity text-white ${
-            item.status === "Out of Stock" ? "bg-primary" : "bg-secondary"
-          }`}
-        >
-          {item.status === "Out of Stock" ? "Reorder Now" : "Reorder"}
-        </button>
-      ),
-    },
-  ];
+  function urgencyBadge(p: ProductResponse) {
+    if (p.quantity <= 0)
+      return <span className="px-2 py-0.5 text-[11px] font-bold uppercase rounded-full bg-error text-on-error">Out of Stock</span>;
+    return <span className="px-2 py-0.5 text-[11px] font-bold uppercase rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">Low Stock</span>;
+  }
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Alert banner */}
-      <div className="amber-alert p-4 rounded flex items-center shadow-sm">
-        <span className="material-symbols-outlined mr-3 text-[24px]">warning</span>
-        <div className="flex-1">
-          <h3 className="font-bold text-sm">Critical Inventory Alert</h3>
-          <p className="text-[13px]">
-            {loading
-              ? "Checking inventory levels…"
-              : `There ${rows.length === 1 ? "is" : "are"} ${rows.length} item${
-                  rows.length === 1 ? "" : "s"
-                } currently below their reorder threshold. Immediate action recommended to avoid stockouts.`}
-          </p>
-        </div>
-        <button className="bg-white/50 hover:bg-white text-xs px-3 py-1.5 rounded font-bold uppercase tracking-wide border border-black/10 transition-colors">
-          Generate PO All
+    <div className="p-container_padding">
+      <div className="flex items-center gap-4 mb-6">
+        <button onClick={() => router.back()} className="p-2 hover:bg-surface-container rounded-lg transition-colors">
+          <span className="material-symbols-outlined text-on-surface-variant">arrow_back</span>
         </button>
-      </div>
-
-      {/* Page header */}
-      <div className="flex justify-between items-end">
         <div>
           <h1 className="font-page-title text-page-title text-on-background">Low Stock Alerts</h1>
-          <p className="text-secondary font-body-reg">Detailed view of products requiring replenishment</p>
-        </div>
-        <div className="flex gap-2">
-          <button className="bg-white border border-outline-variant/30 px-4 py-2 text-secondary font-body-semibold flex items-center shadow-sm hover:bg-surface-container transition-colors">
-            <span className="material-symbols-outlined text-[18px] mr-2">download</span> Export CSV
-          </button>
-          <button className="bg-primary text-on-primary px-4 py-2 font-body-semibold flex items-center shadow-sm hover:opacity-90 transition-opacity">
-            <span className="material-symbols-outlined text-[18px] mr-2">add_shopping_cart</span> Bulk Reorder
-          </button>
+          <p className="text-label-sm text-on-surface-variant mt-0.5">
+            {products.length} product{products.length !== 1 ? 's' : ''} need restocking
+          </p>
         </div>
       </div>
 
-      {error && (
-        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
+      {!loading && products.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4 flex items-start gap-3">
+          <span className="material-symbols-outlined text-yellow-600 shrink-0">warning</span>
+          <div>
+            <p className="font-semibold text-yellow-800 text-sm">Stock Alert</p>
+            <p className="text-yellow-700 text-xs mt-0.5">
+              {products.filter((p) => p.quantity <= 0).length} products are out of stock.{' '}
+              {products.filter((p) => p.quantity > 0).length} are below their reorder threshold.
+            </p>
+          </div>
+        </div>
       )}
 
-      {/* Table */}
-      <PanelCard title="Active Alerts Table" icon="inventory">
-        {loading ? (
-          <p className="p-6 text-center text-secondary">Loading low stock items…</p>
-        ) : rows.length === 0 ? (
-          <p className="p-6 text-center text-secondary">Nothing below threshold — inventory looks healthy.</p>
-        ) : (
-          <>
-            <DataTable columns={columns} rows={rows} rowKey={(i) => String(i.id)} />
-            <Pagination showingFrom={1} showingTo={rows.length} total={rows.length} currentPage={1} totalPages={1} />
-          </>
-        )}
-      </PanelCard>
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low flex items-center gap-2">
+          <span className="material-symbols-outlined text-yellow-600 text-[18px]">warning</span>
+          <span className="font-panel-header text-panel-header">Products Requiring Attention</span>
+        </div>
 
-      {/* Bento summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-[15px]">
-        <div className="bg-white border border-[#EEEEEE] p-4 flex items-center gap-4 shadow-sm">
-          <div className="w-12 h-12 rounded-full bg-error-container flex items-center justify-center text-error flex-shrink-0">
-            <span className="material-symbols-outlined text-[28px]">trending_down</span>
+        {loading ? (
+          <TableSkeleton rows={6} columns={5} />
+        ) : products.length === 0 ? (
+          <EmptyState
+            icon="check_circle"
+            title="All products are well stocked"
+            description="No products are currently below their reorder threshold. Great job!"
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-surface-container border-b border-outline-variant/20">
+                <tr>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Product</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Category</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-center">Current Stock</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-center">Threshold</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-center">Status</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {products.map((p, idx) => (
+                  <tr key={p.id}
+                    className={`hover:bg-surface-container-low transition-colors ${idx % 2 === 1 ? 'bg-surface-container-lowest' : 'bg-white'} ${p.quantity <= 0 ? 'border-l-4 border-error' : 'border-l-4 border-yellow-400'}`}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        {p.imageUrl ? (
+                          <img src={p.imageUrl} alt={p.name} className="w-10 h-10 rounded object-cover border border-outline-variant/20 shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded bg-surface-container flex items-center justify-center shrink-0">
+                            <span className="material-symbols-outlined text-on-surface-variant/30 text-xl">image</span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-body-semibold text-on-surface">{p.name}</p>
+                          <p className="text-label-sm text-on-surface-variant">{p.sku}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 text-[11px] font-bold uppercase rounded-full bg-secondary-container text-on-secondary-container">
+                        {p.categoryName || '—'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center font-bold text-error">{p.quantity}</td>
+                    <td className="px-4 py-3 text-center text-on-surface-variant">{p.lowStockThreshold}</td>
+                    <td className="px-4 py-3 text-center">{urgencyBadge(p)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => router.push(`/products/edit/${p.id}`)}
+                        className="px-3 py-1.5 bg-primary text-on-primary rounded-lg text-xs font-bold hover:brightness-110 transition-all"
+                      >
+                        Restock
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div>
-            <p className="text-secondary text-xs uppercase font-bold tracking-tight">Restock Value Needed</p>
-            <p className="text-2xl font-bold">KES {Math.round(restockValueNeeded).toLocaleString()}</p>
-            <p className="text-[11px] text-error font-bold">Value to bring all items to threshold</p>
-          </div>
-        </div>
-        <div className="bg-white border border-[#EEEEEE] p-4 flex items-center gap-4 shadow-sm">
-          <div className="w-12 h-12 rounded-full bg-secondary-container flex items-center justify-center text-secondary flex-shrink-0">
-            <span className="material-symbols-outlined text-[28px]">local_shipping</span>
-          </div>
-          <div>
-            <p className="text-secondary text-xs uppercase font-bold tracking-tight">Pending Orders</p>
-            <p className="text-2xl font-bold">{pendingOrders}</p>
-            <p className="text-[11px] text-on-secondary-container font-bold">Incoming stock shipments</p>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

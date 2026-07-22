@@ -1,4 +1,3 @@
-// src/app/(dashboard)/sales/quotations/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -6,7 +5,7 @@ import PanelCard from "@/components/ui/PanelCard";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import Badge from "@/components/ui/Badge";
 import Pagination from "@/components/ui/Pagination";
-import { quotationsApi, ApiError, QuotationResponseDto } from "@/lib/api";
+import { quotationApi, ApiError, QuotationResponse } from "@/lib/api";
 import { useToast } from "@/context/ToastContext";
 
 type BadgeColor = "amber" | "emerald" | "blue" | "gray";
@@ -28,7 +27,7 @@ function formatDate(dateStr: string) {
 
 export default function QuotationsPage() {
   const toast = useToast();
-  const [quotations, setQuotations] = useState<QuotationResponseDto[]>([]);
+  const [quotations, setQuotations] = useState<QuotationResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +39,7 @@ export default function QuotationsPage() {
     setLoading(true);
     setError(null);
     try {
-      setQuotations(await quotationsApi.list());
+      setQuotations(await quotationApi.getAll());
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load quotations.");
     } finally {
@@ -73,12 +72,12 @@ export default function QuotationsPage() {
     return list;
   }, [quotations, search, statusFilter, dateFilter]);
 
-  async function handleConvert(q: QuotationResponseDto) {
+  async function handleConvert(q: QuotationResponse) {
     const status = q.status?.toUpperCase();
     if (status === "CONVERTED" || status === "EXPIRED") return;
     if (!confirm(`Convert quotation #${q.id} to a completed sale?`)) return;
     try {
-      await quotationsApi.convert(q.id);
+      await quotationApi.convert(q.id);
       toast.success(`Quotation #${q.id} converted to a sale.`);
       await load();
     } catch (err) {
@@ -86,11 +85,11 @@ export default function QuotationsPage() {
     }
   }
 
-  async function handleDelete(q: QuotationResponseDto) {
+  async function handleDelete(q: QuotationResponse) {
     if (q.status?.toUpperCase() === "CONVERTED") return;
     if (!confirm(`Delete quotation #${q.id}?`)) return;
     try {
-      await quotationsApi.remove(q.id);
+      await quotationApi.remove(q.id);
       setQuotations((prev) => prev.filter((x) => x.id !== q.id));
       toast.success(`Quotation #${q.id} deleted.`);
     } catch (err) {
@@ -98,7 +97,7 @@ export default function QuotationsPage() {
     }
   }
 
-  function ActionButtons({ q }: { q: QuotationResponseDto }) {
+  function ActionButtons({ q }: { q: QuotationResponse }) {
     const status = q.status?.toUpperCase();
     const isConverted = status === "CONVERTED";
     const isExpired = status === "EXPIRED";
@@ -142,7 +141,7 @@ export default function QuotationsPage() {
     );
   }
 
-  const columns: Column<QuotationResponseDto>[] = [
+  const columns: Column<QuotationResponse>[] = [
     { header: "Quote ID", width: "120px", render: (q) => <span className="font-body-semibold text-primary">#{q.id}</span> },
     { header: "Date", render: (q) => formatDate(q.quotationDate) },
     { header: "Customer", render: (q) => q.customerName ?? "Walk-in" },

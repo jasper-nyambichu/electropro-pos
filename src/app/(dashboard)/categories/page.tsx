@@ -1,180 +1,203 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  categoriesApi,
-  productsApi,
-  ApiError,
-  CategoryResponseDto,
-  ProductResponseDto,
-} from "@/lib/api";
-import { useToast } from "@/context/ToastContext";
-
-type CategoryColor = "blue" | "red" | "purple" | "amber" | "green" | "slate";
-const COLORS: CategoryColor[] = ["blue", "red", "purple", "amber", "green", "slate"];
-
-const COLOR_STYLES: Record<CategoryColor, { header: string; iconBg: string; number: string }> = {
-  blue: { header: "bg-blue-50 border-blue-100", iconBg: "bg-blue-600", number: "text-blue-700" },
-  red: { header: "bg-red-50 border-red-100", iconBg: "bg-red-600", number: "text-red-700" },
-  purple: { header: "bg-purple-50 border-purple-100", iconBg: "bg-purple-600", number: "text-purple-700" },
-  amber: { header: "bg-amber-50 border-amber-100", iconBg: "bg-amber-600", number: "text-amber-700" },
-  green: { header: "bg-green-50 border-green-100", iconBg: "bg-green-600", number: "text-green-700" },
-  slate: { header: "bg-slate-100 border-slate-200", iconBg: "bg-slate-600", number: "text-slate-700" },
-};
+import { useEffect, useState } from 'react';
+import { categoryApi, type CategoryResponse, type CategoryRequest } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
+import TableSkeleton from '@/components/ui/TableSkeleton';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 
 export default function CategoriesPage() {
-  const toast = useToast();
-  const [categories, setCategories] = useState<CategoryResponseDto[]>([]);
-  const [products, setProducts] = useState<ProductResponseDto[]>([]);
+  const { success, error } = useToast();
+  const [categories, setCategories] = useState<CategoryResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CategoryResponse | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [editing, setEditing] = useState<CategoryResponse | null>(null);
+  const [form, setForm] = useState<CategoryRequest>({ name: '', description: '' });
   const [saving, setSaving] = useState(false);
 
-  async function load() {
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  async function fetchCategories() {
     setLoading(true);
-    setError(null);
     try {
-      const [c, p] = await Promise.all([categoriesApi.list(), productsApi.list()]);
-      setCategories(c);
-      setProducts(p);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load categories.");
+      const data = await categoryApi.getAll();
+      setCategories(data);
+    } catch (err: unknown) {
+      error('Failed to load categories', err instanceof Error ? err.message : undefined);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    load();
-  }, []);
+  function openAdd() {
+    setEditing(null);
+    setForm({ name: '', description: '' });
+    setShowForm(true);
+  }
 
-  const countByCategory = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const p of products) {
-      if (!p.categoryName) continue;
-      map.set(p.categoryName, (map.get(p.categoryName) ?? 0) + 1);
-    }
-    return map;
-  }, [products]);
+  function openEdit(c: CategoryResponse) {
+    setEditing(c);
+    setForm({ name: c.name, description: c.description });
+    setShowForm(true);
+  }
 
-  async function handleCreate(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
     setSaving(true);
     try {
-      await categoriesApi.create({ name: name.trim(), description: description.trim() || undefined });
+      if (editing) {
+        const updated = await categoryApi.update(editing.id, form);
+        setCategories((prev) => prev.map((c) => (c.id === editing.id ? updated : c)));
+        success('Category updated', `${form.name} has been updated.`);
+      } else {
+        const created = await categoryApi.create(form);
+        setCategories((prev) => [...prev, created]);
+        success('Category created', `${form.name} has been added.`);
+      }
       setShowForm(false);
-      setName("");
-      setDescription("");
-      toast.success(`Category "${name}" created.`);
-      await load();
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not create category.");
+    } catch (err: unknown) {
+      error('Save failed', err instanceof Error ? err.message : undefined);
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleDelete(c: CategoryResponseDto) {
-    if (!confirm(`Delete category "${c.name}"?`)) return;
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await categoriesApi.remove(c.id);
-      setCategories((prev) => prev.filter((x) => x.id !== c.id));
-      toast.success(`Category "${c.name}" deleted.`);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not delete category.");
+      await categoryApi.delete(deleteTarget.id);
+      setCategories((prev) => prev.filter((c) => c.id !== deleteTarget.id));
+      success('Category deleted', `${deleteTarget.name} has been removed.`);
+      setDeleteTarget(null);
+    } catch (err: unknown) {
+      error('Delete failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setDeleting(false);
     }
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex justify-between items-center">
+    <div className="p-container_padding">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-page-title font-page-title text-on-background">Categories</h1>
-          <nav className="flex text-label-sm text-secondary gap-2 items-center mt-1">
-            <span>Dashboard</span>
-            <span className="material-symbols-outlined text-[12px]">chevron_right</span>
-            <span className="text-primary font-bold">Categories</span>
-          </nav>
+          <h1 className="font-page-title text-page-title text-on-background">Categories</h1>
+          <p className="text-label-sm text-on-surface-variant mt-0.5">{categories.length} categories</p>
         </div>
         <button
-          onClick={() => setShowForm((v) => !v)}
-          className="bg-primary text-on-primary px-4 py-2 rounded-lg font-body-semibold flex items-center gap-2 hover:opacity-90 transition-opacity"
+          onClick={openAdd}
+          className="bg-primary text-on-primary px-4 py-2 rounded-lg font-body-semibold flex items-center gap-2 hover:brightness-110 transition-all shadow-sm self-start"
         >
           <span className="material-symbols-outlined text-[18px]">add</span>
-          New Category
+          Add Category
         </button>
       </div>
 
-      {error && (
-        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
-      )}
-
+      {/* Add/Edit Form */}
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-white border border-outline-variant/30 rounded p-4 flex flex-wrap gap-4 items-end shadow-sm">
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-label-sm font-body-semibold text-secondary mb-1">Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} required
-              className="w-full border border-outline-variant/50 rounded py-2 px-3 text-body-reg bg-surface" />
-          </div>
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-label-sm font-body-semibold text-secondary mb-1">Description</label>
-            <input value={description} onChange={(e) => setDescription(e.target.value)}
-              className="w-full border border-outline-variant/50 rounded py-2 px-3 text-body-reg bg-surface" />
-          </div>
-          <button type="submit" disabled={saving} className="bg-primary text-on-primary px-4 py-2 rounded font-bold text-label-sm disabled:opacity-50">
-            {saving ? "Saving…" : "Save Category"}
-          </button>
-        </form>
+        <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm p-5 mb-6">
+          <h2 className="font-panel-header text-panel-header mb-4">
+            {editing ? `Edit: ${editing.name}` : 'New Category'}
+          </h2>
+          <form onSubmit={handleSave} className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">Name *</label>
+              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Electronics"
+                className="w-full border border-outline-variant rounded-lg px-3 py-2 text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">Description</label>
+              <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Optional description"
+                className="w-full border border-outline-variant rounded-lg px-3 py-2 text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all" />
+            </div>
+            <div className="flex gap-2 items-end">
+              <button type="button" onClick={() => setShowForm(false)}
+                className="px-4 py-2 border border-outline-variant text-on-surface-variant rounded-lg font-body-semibold hover:bg-surface-container transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={saving}
+                className="px-5 py-2 bg-primary text-on-primary rounded-lg font-body-semibold hover:brightness-110 transition-all flex items-center gap-2 disabled:opacity-60">
+                {saving && <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>}
+                {editing ? 'Update' : 'Create'}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
-      {loading ? (
-        <p className="p-6 text-center text-secondary">Loading categories…</p>
-      ) : categories.length === 0 ? (
-        <div className="border-2 border-dashed border-outline-variant/30 rounded-lg p-8 flex flex-col items-center justify-center text-secondary opacity-60">
-          <p className="font-body-semibold">No categories yet</p>
-          <p className="text-label-sm">Create one to start organizing products.</p>
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-[18px]">category</span>
+          <span className="font-panel-header text-panel-header">Product Categories</span>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[15px]">
-          {categories.map((cat, i) => {
-            const styles = COLOR_STYLES[COLORS[i % COLORS.length]];
-            return (
-              <div key={cat.id} className="bg-white rounded-lg border border-surface-variant overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.08)] flex flex-col">
-                <div className={`flex items-center p-4 border-b ${styles.header}`}>
-                  <div className={`w-12 h-12 rounded-lg ${styles.iconBg} flex items-center justify-center text-white mr-4`}>
-                    <span className="material-symbols-outlined text-[28px]">category</span>
-                  </div>
-                  <div>
-                    <h3 className="text-panel-header font-panel-header text-on-background">{cat.name}</h3>
-                    <p className="text-label-sm text-secondary">{cat.description || "No description"}</p>
-                  </div>
-                </div>
-                <div className="p-4 flex-grow flex items-center justify-between">
-                  <div>
-                    <span className="text-label-sm text-secondary uppercase font-bold tracking-wider">Inventory</span>
-                    <div className={`text-tile-number font-tile-number ${styles.number}`}>
-                      {countByCategory.get(cat.name) ?? 0}
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-surface-container-low px-4 py-2.5 flex justify-end gap-4 border-t border-surface-variant">
-                  <button
-                    onClick={() => handleDelete(cat)}
-                    className="text-label-sm text-error font-bold hover:underline flex items-center gap-1"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">delete</span> Delete
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+
+        {loading ? (
+          <TableSkeleton rows={5} columns={4} />
+        ) : categories.length === 0 ? (
+          <EmptyState
+            icon="category"
+            title="No categories yet"
+            description="Create your first category to organise your products."
+            actionLabel="Add Category"
+            onAction={openAdd}
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-surface-container border-b border-outline-variant/20">
+                <tr>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Name</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Description</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {categories.map((c, idx) => (
+                  <tr key={c.id}
+                    className={`hover:bg-surface-container-low transition-colors ${idx % 2 === 1 ? 'bg-surface-container-lowest' : 'bg-white'}`}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 bg-secondary-container rounded-full flex items-center justify-center shrink-0">
+                          <span className="material-symbols-outlined text-on-secondary-container text-base">category</span>
+                        </div>
+                        <span className="font-body-semibold text-on-surface">{c.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-body-reg text-on-surface-variant">{c.description || '—'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openEdit(c)} className="p-1.5 hover:bg-surface-container rounded transition-colors" title="Edit">
+                          <span className="material-symbols-outlined text-[18px] text-on-surface-variant">edit</span>
+                        </button>
+                        <button onClick={() => setDeleteTarget(c)} className="p-1.5 hover:bg-error-container rounded transition-colors" title="Delete">
+                          <span className="material-symbols-outlined text-[18px] text-error">delete</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete Category"
+        message={`"${deleteTarget?.name}" will be permanently deleted. Products in this category will lose their category assignment.`}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deleting}
+      />
     </div>
   );
 }

@@ -1,18 +1,20 @@
-/**
- * Typed client for the ElectroPOS Spring Boot backend.
- * Base URL comes from NEXT_PUBLIC_API_BASE_URL (see .env.local).
- */
+import { authHeaders, logout } from './auth';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+const BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
+
+// ─── Errors ───────────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  constructor(message: string, status: number) {
     super(message);
+    this.name = 'ApiError';
     this.status = status;
-    this.name = "ApiError";
   }
 }
+
+// ─── Generic fetch wrapper ────────────────────────────────────────────────────
 
 async function request<T>(
   path: string,
@@ -21,111 +23,437 @@ async function request<T>(
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
+      ...authHeaders(),
+      ...(options.headers as Record<string, string>),
     },
   });
 
-  if (!res.ok) {
-    let message = res.statusText;
-    try {
-      const body = await res.json();
-      message = body.message ?? message;
-    } catch {
-      // response wasn't JSON — fall back to statusText
-    }
-    throw new ApiError(res.status, message);
+  if (res.status === 401) {
+    logout();
+    throw new ApiError('Session expired. Please log in again.', 401);
   }
 
-  // DELETE endpoints return no body
-  if (res.status === 204 || res.headers.get("content-length") === "0") {
-    return undefined as T;
+  if (res.status === 403) {
+    throw new ApiError('You do not have permission to perform this action.', 403);
   }
+
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      message = body.message || message;
+    } catch {
+      // ignore
+    }
+    throw new ApiError(message, res.status);
+  }
+
+  // 204 No Content
+  if (res.status === 204) return undefined as T;
 
   return res.json() as Promise<T>;
 }
 
-const get = <T>(path: string) => request<T>(path, { method: "GET" });
-const post = <T>(path: string, body?: unknown) =>
-  request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
-const put = <T>(path: string, body?: unknown) =>
-  request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined });
-const patch = <T>(path: string, body?: unknown) =>
-  request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
-const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 
-// ─── Types (mirror the backend DTOs exactly) ──────────────────────────────
+export const authApi = {
+  login: (data: { email: string; password: string }) =>
+    fetch(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(body.message || 'Invalid email or password', res.status);
+      }
+      return res.json();
+    }),
 
-export interface ProductDto {
+  register: (data: {
+    firstname: string;
+    lastname: string;
+    email: string;
+    password: string;
+    role: string;
+  }) =>
+    fetch(`${BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(body.message || 'Registration failed', res.status);
+      }
+      return res.json();
+    }),
+};
+
+// ─── Categories ───────────────────────────────────────────────────────────────
+
+export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER';
+
+export const categoryApi = {
+  getAll: () => request<CategoryResponse[]>('/categories'),
+  getById: (id: number) => request<CategoryResponse>(`/categories/${id}`),
+  create: (data: CategoryRequest) =>
+    request<CategoryResponse>('/categories', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: number, data: CategoryRequest) =>
+    request<CategoryResponse>(`/categories/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: number) =>
+    request<void>(`/categories/${id}`, { method: 'DELETE' }),
+};
+
+// ─── Products ─────────────────────────────────────────────────────────────────
+
+export const productApi = {
+  getAll: () => request<ProductResponse[]>('/products'),
+  getById: (id: number) => request<ProductResponse>(`/products/${id}`),
+  search: (name: string) =>
+    request<ProductResponse[]>(`/products/search/${encodeURIComponent(name)}`),
+  getLowStock: () => request<ProductResponse[]>('/products/low-stock'),
+  create: (data: ProductRequest) =>
+    request<ProductResponse>('/products', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: number, data: ProductRequest) =>
+    request<ProductResponse>(`/products/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: number) =>
+    request<void>(`/products/${id}`, { method: 'DELETE' }),
+};
+
+// ─── Customers ────────────────────────────────────────────────────────────────
+
+export const customerApi = {
+  getAll: () => request<CustomerResponse[]>('/customers'),
+  getById: (id: number) => request<CustomerResponse>(`/customers/${id}`),
+  search: (name: string) =>
+    request<CustomerResponse[]>(`/customers/search/${encodeURIComponent(name)}`),
+  create: (data: CustomerRequest) =>
+    request<CustomerResponse>('/customers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: number, data: CustomerRequest) =>
+    request<CustomerResponse>(`/customers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: number) =>
+    request<void>(`/customers/${id}`, { method: 'DELETE' }),
+  getWarranties: (id: number) =>
+    request<WarrantyResponse[]>(`/customers/${id}/warranties`),
+};
+
+// ─── Sales ────────────────────────────────────────────────────────────────────
+
+export const saleApi = {
+  getAll: () => request<SaleResponse[]>('/sales'),
+  getById: (id: number) => request<SaleResponse>(`/sales/${id}`),
+  getByReceipt: (receiptNumber: string) =>
+    request<SaleResponse>(`/sales/receipt/${encodeURIComponent(receiptNumber)}`),
+  create: (data: SaleRequest) =>
+    request<SaleResponse>('/sales', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  refund: (id: number) =>
+    request<SaleResponse>(`/sales/${id}/refund`, { method: 'PATCH' }),
+};
+
+// ─── Sale Items ───────────────────────────────────────────────────────────────
+
+export const saleItemApi = {
+  create: (data: SaleItemRequest) =>
+    request<SaleItemResponse>('/sale-items', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
+// ─── Suppliers ────────────────────────────────────────────────────────────────
+
+export const supplierApi = {
+  getAll: () => request<SupplierResponse[]>('/suppliers'),
+  getById: (id: number) => request<SupplierResponse>(`/suppliers/${id}`),
+  create: (data: SupplierRequest) =>
+    request<SupplierResponse>('/suppliers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: number, data: SupplierRequest) =>
+    request<SupplierResponse>(`/suppliers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: number) =>
+    request<void>(`/suppliers/${id}`, { method: 'DELETE' }),
+};
+
+// ─── Purchase Orders ──────────────────────────────────────────────────────────
+
+export const purchaseOrderApi = {
+  getAll: () => request<PurchaseOrderResponse[]>('/purchases'),
+  getById: (id: number) => request<PurchaseOrderResponse>(`/purchases/${id}`),
+  create: (data: PurchaseOrderRequest) =>
+    request<PurchaseOrderResponse>('/purchases', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  receive: (id: number) =>
+    request<PurchaseOrderResponse>(`/purchases/${id}/receive`, {
+      method: 'PATCH',
+    }),
+  delete: (id: number) =>
+    request<void>(`/purchases/${id}`, { method: 'DELETE' }),
+};
+
+// ─── Purchase Order Items ─────────────────────────────────────────────────────
+
+export const purchaseOrderItemApi = {
+  create: (data: PurchaseOrderItemRequest) =>
+    request<PurchaseOrderItemResponse>('/purchase-order-items', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
+// ─── Warranties ───────────────────────────────────────────────────────────────
+
+export const warrantyApi = {
+  getAll: () => request<WarrantyResponse[]>('/warranties'),
+  getById: (id: number) => request<WarrantyResponse>(`/warranties/${id}`),
+  getExpiring: () => request<WarrantyResponse[]>('/warranties/expiring'),
+  create: (data: WarrantyRequest) =>
+    request<WarrantyResponse>('/warranties', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  claim: (id: number) =>
+    request<WarrantyResponse>(`/warranties/${id}/claim`, { method: 'PATCH' }),
+};
+
+// ─── Quotations ───────────────────────────────────────────────────────────────
+
+export const quotationApi = {
+  getAll: () => request<QuotationResponse[]>('/quotations'),
+  getById: (id: number) => request<QuotationResponse>(`/quotations/${id}`),
+  create: (data: QuotationRequest) =>
+    request<QuotationResponse>('/quotations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: number, data: QuotationRequest) =>
+    request<QuotationResponse>(`/quotations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  convert: (id: number) =>
+    request<QuotationResponse>(`/quotations/${id}/convert`, {
+      method: 'PATCH',
+    }),
+  delete: (id: number) =>
+    request<void>(`/quotations/${id}`, { method: 'DELETE' }),
+  // alias kept for compatibility with pages that call .remove()
+  remove: (id: number) =>
+    request<void>(`/quotations/${id}`, { method: 'DELETE' }),
+};
+
+// ─── Quotation Items ──────────────────────────────────────────────────────────
+
+export const quotationItemApi = {
+  create: (data: QuotationItemRequest) =>
+    request<QuotationItemResponse>('/quotation-items', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
+// ─── Gift Cards ───────────────────────────────────────────────────────────────
+
+export const giftCardApi = {
+  getAll: () => request<GiftCardResponse[]>('/gift-cards'),
+  getByCode: (code: string) =>
+    request<GiftCardResponse>(`/gift-cards/${encodeURIComponent(code)}`),
+  create: (data: GiftCardRequest) =>
+    request<GiftCardResponse>('/gift-cards', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  redeem: (code: string) =>
+    request<GiftCardResponse>(`/gift-cards/${encodeURIComponent(code)}/redeem`, {
+      method: 'PATCH',
+    }),
+  getAllByStatus: (status: string) =>
+    request<GiftCardResponse[]>(`/gift-cards?status=${status}`),
+};
+
+// ─── Reports ──────────────────────────────────────────────────────────────────
+
+export const reportApi = {
+  getDaily: () => request<SaleResponse[]>('/reports/daily'),
+  getCategory: () => request<CategoryResponse[]>('/reports/category'),
+  getStock: () => request<ProductResponse[]>('/reports/stock'),
+};
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+
+export const userApi = {
+  getAll: () => request<UserResponse[]>('/users'),
+};
+
+export interface UserResponse {
+  id: number;
+  firstname: string;
+  lastname: string;
+  email: string;
+  role: UserRole;
+}
+
+// ─── DTO Types ────────────────────────────────────────────────────────────────
+
+export interface CategoryRequest {
+  name: string;
+  description: string;
+}
+
+export interface CategoryResponse {
+  id: number;
+  name: string;
+  description: string;
+}
+
+export interface ProductRequest {
   name: string;
   sku: string;
   price: number;
   costPrice: number;
   quantity: number;
   lowStockThreshold: number;
-  barcode?: string;
-  imageUrl?: string;
-  categoryId?: number;
+  barcode: string;
+  imageUrl: string;
+  categoryId: number;
 }
-export interface ProductResponseDto {
+
+export interface ProductResponse {
   id: number;
   name: string;
   sku: string;
   price: number;
   quantity: number;
   lowStockThreshold: number;
-  barcode?: string;
-  imageUrl?: string;
-  categoryName?: string;
+  barcode: string;
+  imageUrl: string;
+  categoryName: string;
 }
 
-export interface CategoryDto {
-  name: string;
-  description?: string;
-}
-export interface CategoryResponseDto {
-  id: number;
-  name: string;
-  description?: string;
-}
-
-export interface CustomerDto {
+export interface CustomerRequest {
   firstname: string;
   lastname: string;
-  email?: string;
-  phone?: string;
-  address?: string;
+  email: string;
+  phone: string;
+  address: string;
 }
-export interface CustomerResponseDto {
+
+export interface CustomerResponse {
   id: number;
   firstname: string;
   lastname: string;
-  email?: string;
-  phone?: string;
-  address?: string;
+  email: string;
+  phone: string;
+  address: string;
 }
 
-export interface SupplierDto {
-  name: string;
-  contactPerson?: string;
-  email?: string;
-  phone?: string;
+export interface SaleRequest {
+  customerId?: number;
+  paymentMethod: string;
 }
-export interface SupplierResponseDto {
+
+export interface SaleResponse {
+  id: number;
+  receiptNumber: string;
+  saleDate: string;
+  totalAmount: number;
+  paymentMethod: string;
+  status: string;
+  customerName: string;
+  items: SaleItemResponse[];
+}
+
+export interface SaleItemRequest {
+  saleId: number;
+  productId: number;
+  quantity: number;
+}
+
+export interface SaleItemResponse {
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface SupplierRequest {
+  name: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
+}
+
+export interface SupplierResponse {
   id: number;
   name: string;
-  contactPerson?: string;
-  email?: string;
-  phone?: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
 }
 
-export interface WarrantyDto {
+export interface PurchaseOrderRequest {
+  supplierId: number;
+  status: string;
+}
+
+export interface PurchaseOrderResponse {
+  id: number;
+  orderDate: string;
+  totalAmount: number;
+  status: string;
+  supplierName: string;
+}
+
+export interface PurchaseOrderItemRequest {
+  purchaseOrderId: number;
+  productId: number;
+  quantity: number;
+  unitCost: number;
+}
+
+export interface PurchaseOrderItemResponse {
+  productName: string;
+  quantity: number;
+  unitCost: number;
+  subtotal: number;
+}
+
+export interface WarrantyRequest {
   customerId: number;
   productId: number;
-  startDate: string; // ISO date
+  startDate: string;
   endDate: string;
 }
-export interface WarrantyResponseDto {
+
+export interface WarrantyResponse {
   id: number;
   warrantyNumber: string;
   startDate: string;
@@ -135,11 +463,42 @@ export interface WarrantyResponseDto {
   productName: string;
 }
 
-export interface GiftCardDto {
+export interface QuotationRequest {
+  customerId?: number;
+  expiryDate: string;
+}
+
+export interface QuotationResponse {
+  id: number;
+  quotationDate: string;
+  expiryDate: string;
+  totalAmount: number;
+  status: string;
+  customerName: string;
+  items: QuotationItemResponse[];
+  convertedSaleId?: number;
+}
+
+export interface QuotationItemRequest {
+  quotationId: number;
+  productId: number;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface QuotationItemResponse {
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface GiftCardRequest {
   initialValue: number;
   expiryDate: string;
 }
-export interface GiftCardResponseDto {
+
+export interface GiftCardResponse {
   id: number;
   code: string;
   initialValue: number;
@@ -147,242 +506,3 @@ export interface GiftCardResponseDto {
   expiryDate: string;
   status: string;
 }
-
-export interface SaleDto {
-  customerId?: number;
-  paymentMethod: "CASH" | "MPESA" | "CREDIT" | string;
-}
-export interface SaleItemDto {
-  saleId: number;
-  productId: number;
-  quantity: number;
-}
-export interface SaleItemResponseDto {
-  id: number;
-  saleId: number;
-  productId: number;
-  productName: string;
-  quantity: number;
-  unitPrice: number;
-  subtotal: number;
-}
-export interface SaleResponseDto {
-  id: number;
-  receiptNumber: string;
-  saleDate: string;
-  totalAmount: number;
-  paymentMethod: string;
-  status: string;
-  customerName?: string;
-  items: SaleItemResponseDto[];
-}
-
-export interface PurchaseOrderDto {
-  supplierId: number;
-  status?: string;
-}
-export interface PurchaseOrderItemDto {
-  purchaseOrderId: number;
-  productId: number;
-  quantity: number;
-  unitCost: number;
-}
-export interface PurchaseOrderItemResponseDto {
-  id: number;
-  purchaseOrderId: number;
-  productId: number;
-  productName: string;
-  quantity: number;
-  unitCost: number;
-  subtotal: number;
-}
-export interface PurchaseOrderResponseDto {
-  id: number;
-  orderDate: string;
-  totalAmount: number;
-  status: string;
-  supplierName: string;
-  items: PurchaseOrderItemResponseDto[];
-}
-
-export interface QuotationDto {
-  customerId: number;
-  expiryDate: string;
-}
-export interface QuotationItemDto {
-  quotationId: number;
-  productId: number;
-  quantity: number;
-  unitPrice?: number;
-}
-export interface QuotationItemResponseDto {
-  id: number;
-  quotationId: number;
-  productId: number;
-  productName: string;
-  quantity: number;
-  unitPrice: number;
-  subtotal: number;
-}
-export interface QuotationResponseDto {
-  id: number;
-  quotationDate: string;
-  expiryDate: string;
-  totalAmount: number;
-  status: string;
-  customerName?: string;
-  items: QuotationItemResponseDto[];
-  convertedSaleId?: number;
-}
-export interface SettingsDto {
-  businessName: string;
-  kraPin: string;
-  address: string;
-  currency: string;
-  timezone: string;
-  receiptHeaderText: string;
-  receiptFooterText: string;
-  autoGenerateSerialNumbers: boolean;
-  thermalPrinterMode: boolean;
-}
-export interface SettingsResponseDto extends SettingsDto {
-  id: number;
-}
-
-// ─── Products ──────────────────────────────────────────────────────────────
-
-export const productsApi = {
-  list: () => get<ProductResponseDto[]>("/products"),
-  get: (id: number) => get<ProductResponseDto>(`/products/${id}`),
-  search: (name: string) =>
-    get<ProductResponseDto[]>(`/products/search/${encodeURIComponent(name)}`),
-  lowStock: () => get<ProductResponseDto[]>("/products/low-stock"),
-  create: (dto: ProductDto) => post<ProductResponseDto>("/products", dto),
-  update: (id: number, dto: ProductDto) =>
-    put<ProductResponseDto>(`/products/${id}`, dto),
-  remove: (id: number) => del<void>(`/products/${id}`),
-};
-
-// ─── Categories ────────────────────────────────────────────────────────────
-
-export const categoriesApi = {
-  list: () => get<CategoryResponseDto[]>("/categories"),
-  get: (id: number) => get<CategoryResponseDto>(`/categories/${id}`),
-  create: (dto: CategoryDto) => post<CategoryResponseDto>("/categories", dto),
-  update: (id: number, dto: CategoryDto) =>
-    put<CategoryResponseDto>(`/categories/${id}`, dto),
-  remove: (id: number) => del<void>(`/categories/${id}`),
-};
-
-// ─── Customers ─────────────────────────────────────────────────────────────
-
-export const customersApi = {
-  list: () => get<CustomerResponseDto[]>("/customers"),
-  get: (id: number) => get<CustomerResponseDto>(`/customers/${id}`),
-  search: (name: string) =>
-    get<CustomerResponseDto[]>(`/customers/search/${encodeURIComponent(name)}`),
-  create: (dto: CustomerDto) => post<CustomerResponseDto>("/customers", dto),
-  update: (id: number, dto: CustomerDto) =>
-    put<CustomerResponseDto>(`/customers/${id}`, dto),
-  remove: (id: number) => del<void>(`/customers/${id}`),
-};
-
-// ─── Suppliers ─────────────────────────────────────────────────────────────
-
-export const suppliersApi = {
-  list: () => get<SupplierResponseDto[]>("/suppliers"),
-  get: (id: number) => get<SupplierResponseDto>(`/suppliers/${id}`),
-  create: (dto: SupplierDto) => post<SupplierResponseDto>("/suppliers", dto),
-  update: (id: number, dto: SupplierDto) =>
-    put<SupplierResponseDto>(`/suppliers/${id}`, dto),
-  remove: (id: number) => del<void>(`/suppliers/${id}`),
-};
-
-// ─── Warranties ────────────────────────────────────────────────────────────
-
-export const warrantiesApi = {
-  list: () => get<WarrantyResponseDto[]>("/warranties"),
-  get: (id: number) => get<WarrantyResponseDto>(`/warranties/${id}`),
-  expiring: () => get<WarrantyResponseDto[]>("/warranties/expiring"),
-  create: (dto: WarrantyDto) => post<WarrantyResponseDto>("/warranties", dto),
-  claim: (id: number) => patch<WarrantyResponseDto>(`/warranties/${id}/claim`),
-};
-
-// ─── Gift cards ────────────────────────────────────────────────────────────
-
-export const giftCardsApi = {
-  list: () => get<GiftCardResponseDto[]>("/gift-cards"),
-  get: (code: string) => get<GiftCardResponseDto>(`/gift-cards/${code}`),
-  create: (dto: GiftCardDto) => post<GiftCardResponseDto>("/gift-cards", dto),
-  redeem: (code: string) =>
-    patch<GiftCardResponseDto>(`/gift-cards/${code}/redeem`),
-};
-
-// ─── Sales + sale items ─────────────────────────────────────────────────────
-
-export const salesApi = {
-  list: () => get<SaleResponseDto[]>("/sales"),
-  get: (id: number) => get<SaleResponseDto>(`/sales/${id}`),
-  getByReceipt: (receiptNumber: string) =>
-    get<SaleResponseDto>(`/sales/receipt/${receiptNumber}`),
-  create: (dto: SaleDto) => post<SaleResponseDto>("/sales", dto),
-  refund: (id: number) => patch<SaleResponseDto>(`/sales/${id}/refund`),
-  items: (saleId: number) =>
-    get<SaleItemResponseDto[]>(`/sales/${saleId}/items`),
-  addItem: (dto: SaleItemDto) =>
-    post<SaleItemResponseDto>("/sale-items", dto),
-  removeItem: (itemId: number) => del<void>(`/sale-items/${itemId}`),
-};
-
-// ─── Purchase orders + items ────────────────────────────────────────────────
-
-export const purchaseOrdersApi = {
-  list: () => get<PurchaseOrderResponseDto[]>("/purchases"),
-  get: (id: number) => get<PurchaseOrderResponseDto>(`/purchases/${id}`),
-  create: (dto: PurchaseOrderDto) =>
-    post<PurchaseOrderResponseDto>("/purchases", dto),
-  receive: (id: number) =>
-    patch<PurchaseOrderResponseDto>(`/purchases/${id}/receive`),
-  remove: (id: number) => del<void>(`/purchases/${id}`),
-  items: (purchaseOrderId: number) =>
-    get<PurchaseOrderItemResponseDto[]>(`/purchases/${purchaseOrderId}/items`),
-  addItem: (dto: PurchaseOrderItemDto) =>
-    post<PurchaseOrderItemResponseDto>("/purchase-order-items", dto),
-  removeItem: (itemId: number) => del<void>(`/purchase-order-items/${itemId}`),
-};
-
-// ─── Quotations + items ─────────────────────────────────────────────────────
-
-export const quotationsApi = {
-  list: () => get<QuotationResponseDto[]>("/quotations"),
-  get: (id: number) => get<QuotationResponseDto>(`/quotations/${id}`),
-  create: (dto: QuotationDto) =>
-    post<QuotationResponseDto>("/quotations", dto),
-  update: (id: number, dto: QuotationDto) =>
-    put<QuotationResponseDto>(`/quotations/${id}`, dto),
-  convert: (id: number, paymentMethod?: string) =>
-    patch<QuotationResponseDto>(`/quotations/${id}/convert`, {
-      paymentMethod,
-    }),
-  remove: (id: number) => del<void>(`/quotations/${id}`),
-  items: (quotationId: number) =>
-    get<QuotationItemResponseDto[]>(`/quotations/${quotationId}/items`),
-  addItem: (dto: QuotationItemDto) =>
-    post<QuotationItemResponseDto>("/quotation-items", dto),
-  removeItem: (itemId: number) => del<void>(`/quotation-items/${itemId}`),
-};
-
-// ─── Reports ────────────────────────────────────────────────────────────────
-
-export const reportsApi = {
-  daily: () => get<SaleResponseDto[]>("/reports/daily"),
-  category: () => get<CategoryResponseDto[]>("/reports/category"),
-  stock: () => get<ProductResponseDto[]>("/reports/stock"),
-};
-
-// ─── Settings ──────────────────────────────────────────────────────────────
-
-export const settingsApi = {
-  get: () => get<SettingsResponseDto>("/settings"),
-  update: (dto: SettingsDto) => put<SettingsResponseDto>("/settings", dto),
-};

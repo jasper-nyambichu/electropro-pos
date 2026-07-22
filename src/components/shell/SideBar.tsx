@@ -1,20 +1,31 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "@/context/SidebarContext";
 import SidebarLink from "./SidebarLink";
 import { NAV_ITEMS } from "@/lib/constants";
+import { getUser, logout, type AuthUser } from "@/lib/auth";
 
 export default function SideBar() {
   const { open, collapsed, close } = useSidebar();
   const pathname = usePathname();
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    setUser(getUser());
+  }, []);
 
   // Close mobile drawer on navigation
   useEffect(() => {
     close();
   }, [pathname, close]);
+
+  function handleLogout() {
+    if (!confirm("Are you sure you want to log out?")) return;
+    logout();
+  }
 
   return (
     <>
@@ -64,6 +75,36 @@ export default function SideBar() {
               <SidebarLink key={item.href} item={item} />
             )
           )}
+        </div>
+
+        {/* Footer: current user + logout */}
+        <div className="border-t border-outline-variant/20 py-2">
+          {!collapsed && user && (
+            <div className="flex items-center gap-2 px-4 py-2">
+              <div className="w-7 h-7 rounded-full bg-on-secondary/20 flex items-center justify-center text-[11px] font-bold shrink-0">
+                {user.firstname?.charAt(0).toUpperCase() ?? "?"}
+              </div>
+              <div className="min-w-0">
+                <p className="font-sidebar-item text-sidebar-item leading-tight truncate">
+                  {user.firstname}
+                </p>
+                <p className="text-[11px] text-on-secondary/60 leading-tight capitalize">
+                  {user.role?.toLowerCase()}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={handleLogout}
+            title="Log out"
+            className={`flex items-center w-full py-3 text-on-secondary/70 hover:bg-on-secondary-fixed-variant hover:text-on-secondary transition-all ${
+              collapsed ? "justify-center px-2" : "px-4"
+            }`}
+          >
+            <span className="material-symbols-outlined mr-3">logout</span>
+            {!collapsed && <span className="font-sidebar-item text-sidebar-item">Log out</span>}
+          </button>
         </div>
       </aside>
 

@@ -1,168 +1,110 @@
-// src/app/(dashboard)/customers/add/page.tsx
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { customersApi, ApiError } from "@/lib/api";
-import { useToast } from "@/context/ToastContext";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { customerApi } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
 
 export default function AddCustomerPage() {
-  const toast = useToast();
   const router = useRouter();
-  const [saving, setSaving] = useState(false);
+  const { success, error } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({
+    firstname: '', lastname: '', email: '', phone: '', address: '',
+  });
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function set(key: string, value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const form = e.currentTarget;
-    const formData = new FormData(form);
-
-    const fullName = String(formData.get("fullName") ?? "").trim();
-    const [firstname, ...rest] = fullName.split(" ");
-    const lastname = rest.join(" ") || firstname; // fallback if only one name given
-
-    const phone = String(formData.get("phone") ?? "").trim() || undefined;
-    const email = String(formData.get("email") ?? "").trim() || undefined;
-    const address = String(formData.get("address") ?? "").trim() || undefined;
-
-    if (!firstname) return;
-
-    setSaving(true);
+    setLoading(true);
     try {
-      await customersApi.create({ firstname, lastname, email, phone, address });
-      toast.success(`Customer "${fullName}" saved.`);
-      form.reset();
-      router.push("/customers");
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not save customer.");
+      await customerApi.create(form);
+      success('Customer added', `${form.firstname} ${form.lastname} has been registered.`);
+      router.push('/customers');
+    } catch (err: unknown) {
+      error('Failed to add customer', err instanceof Error ? err.message : undefined);
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   }
 
   return (
-    <div className="max-w-[700px] mx-auto space-y-6">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="font-page-title text-page-title text-on-surface">Add Customer</h1>
-        <nav className="text-label-sm text-secondary flex items-center gap-1">
-          <span className="material-symbols-outlined text-[14px]">home</span>
-          <span>Dashboard</span>
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-          <span>Customers</span>
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-          <span className="text-primary font-bold">New Entry</span>
-        </nav>
-      </div>
-
-      <div className="bg-surface-container-lowest border border-surface-variant shadow-sm rounded-sm">
-        <div className="px-card_padding py-3 border-b border-surface-variant flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary text-[20px]">person_add</span>
-            <span className="font-panel-header text-panel-header text-on-surface">
-              Customer Registration Form
-            </span>
-          </div>
-          <span className="text-[10px] uppercase font-bold text-secondary opacity-50">
-            Operational Form CF-12
-          </span>
-        </div>
-        <div className="p-[20px]">
-          <form className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5" onSubmit={handleSubmit}>
-            <div className="md:col-span-2">
-              <label className="block font-body-semibold text-label-sm mb-1 text-on-surface-variant">
-                Full Name *
-              </label>
-              <input
-                name="fullName"
-                className="w-full h-10 px-3 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm transition-all"
-                placeholder="John Doe or Acme Corp"
-                required
-                type="text"
-              />
-            </div>
-            <div>
-              <label className="block font-body-semibold text-label-sm mb-1 text-on-surface-variant">
-                Customer Type
-              </label>
-              {/* Not yet in CustomerDto — collected for future use */}
-              <select className="w-full h-10 px-3 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm appearance-none">
-                <option value="individual">Individual</option>
-                <option value="organization">Organization</option>
-              </select>
-            </div>
-            <div>
-              <label className="block font-body-semibold text-label-sm mb-1 text-on-surface-variant">
-                Phone Number
-              </label>
-              <input
-                name="phone"
-                className="w-full h-10 px-3 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm"
-                placeholder="+254 700 000 000"
-                type="tel"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block font-body-semibold text-label-sm mb-1 text-on-surface-variant">
-                Email Address
-              </label>
-              <input
-                name="email"
-                className="w-full h-10 px-3 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm"
-                placeholder="customer@example.com"
-                type="email"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block font-body-semibold text-label-sm mb-1 text-on-surface-variant">
-                Shipping/Billing Address
-              </label>
-              <textarea
-                name="address"
-                className="w-full px-3 py-2 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm resize-none"
-                placeholder="123 Commerce St, Suite 100..."
-                rows={3}
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block font-body-semibold text-label-sm mb-1 text-on-surface-variant">
-                Internal Notes
-              </label>
-              {/* Not yet in CustomerDto — collected for future use */}
-              <textarea
-                className="w-full px-3 py-2 border border-outline-variant bg-surface text-body-reg focus:border-primary focus:ring-0 rounded-sm resize-none"
-                placeholder="Preferred shipping methods, credit terms, etc."
-                rows={3}
-              />
-            </div>
-            <div className="md:col-span-2 flex justify-end gap-3 pt-4 border-t border-surface-variant">
-              <button
-                className="px-6 h-10 font-body-semibold text-label-sm text-secondary bg-surface-container-high hover:bg-surface-variant border border-outline-variant rounded-sm transition-colors"
-                type="button"
-                onClick={() => router.push("/customers")}
-              >
-                Cancel
-              </button>
-              <button
-                className="px-6 h-10 font-body-semibold text-label-sm text-white bg-green-600 hover:bg-green-700 rounded-sm shadow-sm transition-all active:scale-[0.98] disabled:opacity-60"
-                type="submit"
-                disabled={saving}
-              >
-                {saving ? "Saving..." : "Save Customer"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <div className="bg-blue-50 border border-blue-200 p-4 rounded-sm flex items-start gap-4">
-        <span className="material-symbols-outlined text-blue-600 mt-0.5">info</span>
+    <div className="p-container_padding">
+      <div className="flex items-center gap-4 mb-6">
+        <button onClick={() => router.back()} className="p-2 hover:bg-surface-container rounded-lg transition-colors">
+          <span className="material-symbols-outlined text-on-surface-variant">arrow_back</span>
+        </button>
         <div>
-          <h4 className="font-body-semibold text-blue-800 text-[14px]">Customer Data Privacy</h4>
-          <p className="text-blue-700 text-label-sm">
-            All customer data is encrypted at rest. Please ensure you have explicit consent before
-            storing marketing preferences according to local regulations.
-          </p>
+          <h1 className="font-page-title text-page-title text-on-background">Add Customer</h1>
+          <nav className="flex text-label-sm text-on-surface-variant gap-1 mt-0.5">
+            <span className="hover:text-primary cursor-pointer" onClick={() => router.push('/customers')}>Customers</span>
+            <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+            <span className="text-on-surface font-semibold">Add Customer</span>
+          </nav>
         </div>
       </div>
+
+      <form onSubmit={handleSubmit} className="max-w-2xl">
+        <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-outline-variant/20 bg-surface-container-low flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary text-[18px]">person_add</span>
+            <span className="font-panel-header text-panel-header">Customer Details</span>
+          </div>
+
+          <div className="p-6 space-y-5">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">First Name *</label>
+                <input required value={form.firstname} onChange={(e) => set('firstname', e.target.value)}
+                  placeholder="John"
+                  className="w-full border border-outline-variant rounded-lg px-3 py-2 text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">Last Name *</label>
+                <input required value={form.lastname} onChange={(e) => set('lastname', e.target.value)}
+                  placeholder="Kamau"
+                  className="w-full border border-outline-variant rounded-lg px-3 py-2 text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">Email *</label>
+              <input required type="email" value={form.email} onChange={(e) => set('email', e.target.value)}
+                placeholder="john.kamau@gmail.com"
+                className="w-full border border-outline-variant rounded-lg px-3 py-2 text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all" />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">Phone</label>
+              <input type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)}
+                placeholder="0712 345 678"
+                className="w-full border border-outline-variant rounded-lg px-3 py-2 text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all" />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">Address</label>
+              <input value={form.address} onChange={(e) => set('address', e.target.value)}
+                placeholder="Nairobi, Kenya"
+                className="w-full border border-outline-variant rounded-lg px-3 py-2 text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all" />
+            </div>
+          </div>
+
+          <div className="px-6 py-4 bg-surface-container-low border-t border-outline-variant/20 flex justify-end gap-3">
+            <button type="button" onClick={() => router.back()}
+              className="px-5 py-2 border border-outline-variant text-on-surface-variant rounded-lg font-body-semibold hover:bg-surface-container transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={loading}
+              className="px-6 py-2 bg-primary text-on-primary rounded-lg font-body-semibold hover:brightness-110 transition-all flex items-center gap-2 disabled:opacity-60">
+              {loading && <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>}
+              {loading ? 'Saving…' : 'Save Customer'}
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }

@@ -1,4 +1,3 @@
-// src/app/(dashboard)/sales/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -8,7 +7,7 @@ import PanelCard from "@/components/ui/PanelCard";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import Badge from "@/components/ui/Badge";
 import Pagination from "@/components/ui/Pagination";
-import { salesApi, ApiError, SaleResponseDto } from "@/lib/api";
+import { saleApi, ApiError, SaleResponse } from "@/lib/api";
 import { useToast } from "@/context/ToastContext";
 
 const PAYMENT_DOT: Record<string, string> = {
@@ -33,7 +32,7 @@ function last7Days() {
 
 export default function SalesPage() {
   const toast = useToast();
-  const [sales, setSales] = useState<SaleResponseDto[]>([]);
+  const [sales, setSales] = useState<SaleResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,7 +45,7 @@ export default function SalesPage() {
     setLoading(true);
     setError(null);
     try {
-      setSales(await salesApi.list());
+      setSales(await saleApi.getAll());
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load sales.");
     } finally {
@@ -105,11 +104,11 @@ export default function SalesPage() {
     }));
   }, [sales]);
 
-  async function handleRefund(s: SaleResponseDto) {
+  async function handleRefund(s: SaleResponse) {
     if (s.status === "REFUNDED") return;
     if (!confirm(`Refund sale ${s.receiptNumber}?`)) return;
     try {
-      await salesApi.refund(s.id);
+      await saleApi.refund(s.id);
       toast.success(`Sale ${s.receiptNumber} refunded.`);
       await load();
     } catch (err) {
@@ -117,7 +116,7 @@ export default function SalesPage() {
     }
   }
 
-  const columns: Column<SaleResponseDto>[] = [
+  const columns: Column<SaleResponse>[] = [
     { header: "Sale ID", render: (s) => <span className="font-body-semibold text-primary">{s.receiptNumber}</span> },
     { header: "Date", render: (s) => new Date(s.saleDate).toLocaleString() },
     {

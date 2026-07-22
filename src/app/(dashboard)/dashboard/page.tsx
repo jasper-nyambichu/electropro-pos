@@ -1,21 +1,20 @@
-// src/app/(dashboard)/dashboard/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import SalesChart from "@/components/charts/SalesChart";
 import {
-  categoriesApi,
-  customersApi,
-  productsApi,
-  quotationsApi,
-  salesApi,
+  categoryApi,
+  customerApi,
+  productApi,
+  quotationApi,
+  saleApi,
   ApiError,
-  CategoryResponseDto,
-  CustomerResponseDto,
-  ProductResponseDto,
-  QuotationResponseDto,
-  SaleResponseDto,
+  CategoryResponse,
+  CustomerResponse,
+  ProductResponse,
+  QuotationResponse,
+  SaleResponse,
 } from "@/lib/api";
 
 interface TopProduct {
@@ -33,11 +32,11 @@ interface Tile {
 }
 
 export default function DashboardPage() {
-  const [products, setProducts] = useState<ProductResponseDto[]>([]);
-  const [categories, setCategories] = useState<CategoryResponseDto[]>([]);
-  const [customers, setCustomers] = useState<CustomerResponseDto[]>([]);
-  const [sales, setSales] = useState<SaleResponseDto[]>([]);
-  const [quotations, setQuotations] = useState<QuotationResponseDto[]>([]);
+  const [products, setProducts] = useState<ProductResponse[]>([]);
+  const [categories, setCategories] = useState<CategoryResponse[]>([]);
+  const [customers, setCustomers] = useState<CustomerResponse[]>([]);
+  const [sales, setSales] = useState<SaleResponse[]>([]);
+  const [quotations, setQuotations] = useState<QuotationResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,11 +44,11 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     Promise.all([
-      productsApi.list(),
-      categoriesApi.list(),
-      customersApi.list(),
-      salesApi.list(),
-      quotationsApi.list(),
+      productApi.getAll(),
+      categoryApi.getAll(),
+      customerApi.getAll(),
+      saleApi.getAll(),
+      quotationApi.getAll(),
     ])
       .then(([p, c, cu, s, q]) => {
         setProducts(p);
@@ -71,7 +70,7 @@ export default function DashboardPage() {
 
   // "Open" = quotations not yet converted into a sale
   const openInvoices = useMemo(
-    () => quotations.filter((q) => !q.convertedSaleId).length,
+    () => quotations.filter((q) => q.status?.toUpperCase() !== "CONVERTED").length,
     [quotations]
   );
 

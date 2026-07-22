@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Source_Sans_3 } from "next/font/google";
+import { ToastProvider } from '@/context/ToastContext';
 // @ts-ignore: Next.js handles CSS imports for global styles
 import "./globals.css";
 
@@ -30,7 +31,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={sourceSans.variable}>
       <body className="bg-background text-on-background font-body-reg">
-        {children}
+        <ToastProvider>
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );

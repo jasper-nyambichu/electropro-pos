@@ -1,295 +1,213 @@
-// src/app/(dashboard)/customers/page.tsx
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import Avatar from "@/components/ui/Avatar";
-import DataTable, { Column } from "@/components/ui/DataTable";
-import PanelCard from "@/components/ui/PanelCard";
-import Pagination from "@/components/ui/Pagination";
-import {
-  customersApi,
-  salesApi,
-  ApiError,
-  CustomerResponseDto,
-  SaleResponseDto,
-} from "@/lib/api";
-import { useToast } from "@/context/ToastContext";
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { customerApi, type CustomerResponse } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
+import TableSkeleton from '@/components/ui/TableSkeleton';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmModal from '@/components/ui/ConfirmModal';
+
+function initials(c: CustomerResponse) {
+  return `${c.firstname[0] ?? ''}${c.lastname[0] ?? ''}`.toUpperCase();
+}
 
 const AVATAR_COLORS = [
-  "bg-primary-fixed",
-  "bg-secondary-fixed",
-  "bg-tertiary-fixed",
-  "bg-primary-fixed-dim",
-  "bg-secondary-fixed-dim",
-  "bg-tertiary-fixed-dim",
-  "bg-outline-variant",
+  'bg-blue-500', 'bg-green-500', 'bg-purple-500',
+  'bg-orange-500', 'bg-pink-500', 'bg-teal-500',
 ];
 
-type SortOption = "newest" | "spent-desc" | "spent-asc" | "alpha";
-
-interface CustomerRow extends CustomerResponseDto {
-  fullName: string;
-  initials: string;
-  avatarBg: string;
-  purchases: number;
-  totalSpent: number;
-}
-
-function initialsOf(first: string, last: string) {
-  return `${first?.[0] ?? ""}${last?.[0] ?? ""}`.toUpperCase() || "?";
-}
-
-function cityFromAddress(address?: string) {
-  if (!address) return null;
-  const parts = address.split(",").map((p) => p.trim()).filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : null;
-}
-
 export default function CustomersPage() {
-  const toast = useToast();
-  const [customers, setCustomers] = useState<CustomerResponseDto[]>([]);
-  const [sales, setSales] = useState<SaleResponseDto[]>([]);
+  const router = useRouter();
+  const { success, error } = useToast();
+
+  const [customers, setCustomers] = useState<CustomerResponse[]>([]);
+  const [filtered, setFiltered] = useState<CustomerResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<CustomerResponse | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 10;
 
-  const [search, setSearch] = useState("");
-  const [locationFilter, setLocationFilter] = useState("All Locations");
-  const [sortBy, setSortBy] = useState<SortOption>("newest");
+  useEffect(() => { fetchCustomers(); }, []);
 
-  async function load() {
+  useEffect(() => {
+    const q = search.toLowerCase();
+    setFiltered(
+      q
+        ? customers.filter(
+            (c) =>
+              c.firstname.toLowerCase().includes(q) ||
+              c.lastname.toLowerCase().includes(q) ||
+              c.email.toLowerCase().includes(q) ||
+              c.phone?.toLowerCase().includes(q)
+          )
+        : customers
+    );
+    setPage(1);
+  }, [search, customers]);
+
+  async function fetchCustomers() {
     setLoading(true);
-    setError(null);
     try {
-      const [c, s] = await Promise.all([customersApi.list(), salesApi.list()]);
-      setCustomers(c);
-      setSales(s.filter((sale) => sale.status !== "REFUNDED"));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load customers.");
+      setCustomers(await customerApi.getAll());
+    } catch (err: unknown) {
+      error('Failed to load customers', err instanceof Error ? err.message : undefined);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    load();
-  }, []);
-
-  const rows: CustomerRow[] = useMemo(() => {
-    return customers.map((c, i) => {
-      const fullName = `${c.firstname} ${c.lastname}`.trim();
-      const customerSales = sales.filter((s) => s.customerName === fullName);
-      return {
-        ...c,
-        fullName,
-        initials: initialsOf(c.firstname, c.lastname),
-        avatarBg: AVATAR_COLORS[i % AVATAR_COLORS.length],
-        purchases: customerSales.length,
-        totalSpent: customerSales.reduce((sum, s) => sum + s.totalAmount, 0),
-      };
-    });
-  }, [customers, sales]);
-
-  const locations = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of customers) {
-      const city = cityFromAddress(c.address);
-      if (city) set.add(city);
-    }
-    return Array.from(set).sort();
-  }, [customers]);
-
-  const filtered = useMemo(() => {
-    let list = rows;
-
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter(
-        (c) =>
-          c.fullName.toLowerCase().includes(q) ||
-          c.email?.toLowerCase().includes(q) ||
-          c.phone?.toLowerCase().includes(q)
-      );
-    }
-
-    if (locationFilter !== "All Locations") {
-      list = list.filter((c) => cityFromAddress(c.address) === locationFilter);
-    }
-
-    const sorted = [...list];
-    switch (sortBy) {
-      case "spent-desc":
-        sorted.sort((a, b) => b.totalSpent - a.totalSpent);
-        break;
-      case "spent-asc":
-        sorted.sort((a, b) => a.totalSpent - b.totalSpent);
-        break;
-      case "alpha":
-        sorted.sort((a, b) => a.fullName.localeCompare(b.fullName));
-        break;
-      case "newest":
-      default:
-        sorted.sort((a, b) => b.id - a.id); // no createdAt on the DTO — id desc as a proxy
-    }
-    return sorted;
-  }, [rows, search, locationFilter, sortBy]);
-
-  async function handleDelete(c: CustomerRow) {
-    if (!confirm(`Delete customer "${c.fullName}"?`)) return;
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await customersApi.remove(c.id);
-      setCustomers((prev) => prev.filter((x) => x.id !== c.id));
-      toast.success(`Customer "${c.fullName}" deleted.`);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not delete customer.");
+      await customerApi.delete(deleteTarget.id);
+      setCustomers((prev) => prev.filter((c) => c.id !== deleteTarget.id));
+      success('Customer deleted', `${deleteTarget.firstname} ${deleteTarget.lastname} has been removed.`);
+      setDeleteTarget(null);
+    } catch (err: unknown) {
+      error('Delete failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setDeleting(false);
     }
   }
 
-  const columns: Column<CustomerRow>[] = [
-    {
-      header: "Customer Name",
-      render: (c) => (
-        <div className="flex items-center gap-3">
-          <Avatar initials={c.initials} bgColor={c.avatarBg} />
-          <div>
-            <div className="font-body-semibold">{c.fullName}</div>
-            <div className="text-[11px] text-secondary">{c.phone || c.email || "—"}</div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      header: "Contact Info",
-      render: (c) => (
-        <div>
-          <div className="text-on-surface">{c.phone || "—"}</div>
-          <div className="text-label-sm text-secondary">{c.email || "—"}</div>
-        </div>
-      ),
-    },
-    { header: "Location", render: (c) => cityFromAddress(c.address) ?? "—" },
-    { header: "Purchases", align: "center", render: (c) => c.purchases },
-    {
-      header: "Total Spent (KES)",
-      align: "right",
-      render: (c) => (
-        <span className="font-body-semibold text-primary">
-          {c.totalSpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-        </span>
-      ),
-    },
-    {
-      header: "Actions",
-      align: "center",
-      render: (c) => (
-        <div className="flex justify-center gap-1">
-          <button
-            title="Editing isn't wired up yet"
-            className="p-1.5 hover:bg-secondary-container rounded text-secondary transition-colors opacity-50 cursor-not-allowed"
-          >
-            <span className="material-symbols-outlined text-[18px]">edit</span>
-          </button>
-          <button
-            onClick={() => handleDelete(c)}
-            className="p-1.5 hover:bg-error-container rounded text-error transition-colors"
-          >
-            <span className="material-symbols-outlined text-[18px]">delete</span>
-          </button>
-        </div>
-      ),
-    },
-  ];
+  const totalPages = Math.ceil(filtered.length / PER_PAGE);
+  const paginated = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   return (
-    <div className="flex flex-col gap-gutter">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="p-container_padding">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="font-page-title text-page-title text-on-surface">Customer Directory</h1>
-          <p className="text-label-sm text-secondary">
-            Manage and track your customer base and their purchasing behavior.
-          </p>
+          <h1 className="font-page-title text-page-title text-on-background">Customers</h1>
+          <p className="text-label-sm text-on-surface-variant mt-0.5">{customers.length} registered customers</p>
         </div>
-        <Link
-          href="/customers/add"
-          className="bg-primary hover:bg-primary-container text-on-primary font-body-semibold px-4 py-2 rounded flex items-center gap-2 shadow-sm transition-all active:scale-95"
+        <button
+          onClick={() => router.push('/customers/add')}
+          className="bg-primary text-on-primary px-4 py-2 rounded-lg font-body-semibold flex items-center gap-2 hover:brightness-110 transition-all shadow-sm self-start"
         >
-          <span className="material-symbols-outlined text-[20px]">person_add</span>
+          <span className="material-symbols-outlined text-[18px]">person_add</span>
           Add Customer
-        </Link>
+        </button>
       </div>
 
-      {error && (
-        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
-      )}
-
-      <div className="bg-surface-container-lowest border border-outline-variant/30 rounded p-4 flex flex-wrap gap-4 items-center shadow-sm">
-        <div className="flex-1 min-w-[200px]">
-          <div className="relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-secondary text-[18px]">
-              filter_list
-            </span>
-            <input
-              className="w-full pl-10 pr-3 py-2 border border-outline-variant/50 rounded focus:ring-1 focus:ring-primary focus:border-primary text-body-reg bg-surface"
-              placeholder="Filter by name or email..."
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <select
-            className="border border-outline-variant/50 rounded py-2 px-3 text-body-reg bg-surface focus:ring-1 focus:ring-primary"
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-          >
-            <option>All Locations</option>
-            {locations.map((loc) => (
-              <option key={loc}>{loc}</option>
-            ))}
-          </select>
-          <select
-            className="border border-outline-variant/50 rounded py-2 px-3 text-body-reg bg-surface focus:ring-1 focus:ring-primary"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortOption)}
-          >
-            <option value="newest">Sort by: Newest</option>
-            <option value="spent-desc">Total Spent (High to Low)</option>
-            <option value="spent-asc">Total Spent (Low to High)</option>
-            <option value="alpha">Alphabetical</option>
-          </select>
-          <button className="p-2 border border-outline-variant/50 rounded hover:bg-surface-container transition-colors">
-            <span className="material-symbols-outlined text-secondary">download</span>
-          </button>
+      {/* Search */}
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm p-4 mb-4">
+        <div className="relative max-w-md">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-on-surface-variant/50 text-[18px]">search</span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, email or phone…"
+            className="w-full pl-9 pr-4 py-2 border border-outline-variant rounded-lg text-body-reg focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all"
+          />
         </div>
       </div>
 
-      <PanelCard
-        title="Active Customers"
-        icon="list_alt"
-        headerExtra={
-          <span className="text-label-sm text-secondary">
-            Displaying {filtered.length} of {customers.length} entries
-          </span>
-        }
-      >
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-[18px]">group</span>
+          <span className="font-panel-header text-panel-header">Customer Directory</span>
+        </div>
+
         {loading ? (
-          <p className="p-6 text-center text-secondary">Loading customers…</p>
+          <TableSkeleton rows={8} columns={5} />
         ) : filtered.length === 0 ? (
-          <p className="p-6 text-center text-secondary">No customers found.</p>
+          <EmptyState
+            icon="person"
+            title={search ? 'No customers match your search' : 'No customers yet'}
+            description={search ? 'Try a different search term.' : 'Add your first customer to start tracking relationships.'}
+            actionLabel={search ? undefined : 'Add Customer'}
+            onAction={search ? undefined : () => router.push('/customers/add')}
+          />
         ) : (
           <>
-            <DataTable columns={columns} rows={filtered} rowKey={(c) => String(c.id)} />
-            <Pagination
-              showingFrom={filtered.length ? 1 : 0}
-              showingTo={filtered.length}
-              total={filtered.length}
-              currentPage={1}
-              totalPages={1}
-            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-surface-container border-b border-outline-variant/20">
+                  <tr>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Customer</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Email</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Phone</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Address</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-outline-variant/10">
+                  {paginated.map((c, idx) => (
+                    <tr
+                      key={c.id}
+                      className={`hover:bg-surface-container-low transition-colors cursor-pointer ${idx % 2 === 1 ? 'bg-surface-container-lowest' : 'bg-white'}`}
+                      onClick={() => router.push(`/customers/${c.id}`)}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-full ${AVATAR_COLORS[c.id % AVATAR_COLORS.length]} flex items-center justify-center text-white font-bold text-sm shrink-0`}>
+                            {initials(c)}
+                          </div>
+                          <span className="font-body-semibold text-on-surface">
+                            {c.firstname} {c.lastname}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-body-reg text-on-surface-variant">{c.email}</td>
+                      <td className="px-4 py-3 text-body-reg text-on-surface-variant">{c.phone || '—'}</td>
+                      <td className="px-4 py-3 text-body-reg text-on-surface-variant truncate max-w-[180px]">{c.address || '—'}</td>
+                      <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => router.push(`/customers/${c.id}`)}
+                            className="p-1.5 hover:bg-surface-container rounded transition-colors" title="View">
+                            <span className="material-symbols-outlined text-[18px] text-on-surface-variant">visibility</span>
+                          </button>
+                          <button onClick={() => setDeleteTarget(c)}
+                            className="p-1.5 hover:bg-error-container rounded transition-colors" title="Delete">
+                            <span className="material-symbols-outlined text-[18px] text-error">delete</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="px-4 py-3 bg-surface-container-low border-t border-outline-variant/20 flex items-center justify-between">
+                <span className="text-label-sm text-on-surface-variant">
+                  Showing {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, filtered.length)} of {filtered.length}
+                </span>
+                <div className="flex gap-1">
+                  <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+                    className="px-3 py-1 border border-outline-variant bg-white rounded text-label-sm hover:bg-surface-container disabled:opacity-40 transition-colors">
+                    Previous
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                    <button key={n} onClick={() => setPage(n)}
+                      className={`px-3 py-1 border rounded text-label-sm transition-colors ${n === page ? 'bg-primary text-on-primary border-primary font-bold' : 'bg-white border-outline-variant hover:bg-surface-container'}`}>
+                      {n}
+                    </button>
+                  ))}
+                  <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                    className="px-3 py-1 border border-outline-variant bg-white rounded text-label-sm hover:bg-surface-container disabled:opacity-40 transition-colors">
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
-      </PanelCard>
+      </div>
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete Customer"
+        message={`"${deleteTarget?.firstname} ${deleteTarget?.lastname}" will be permanently removed along with their associated records.`}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deleting}
+      />
     </div>
   );
 }
