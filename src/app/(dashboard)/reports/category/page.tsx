@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import PanelCard from "@/components/ui/PanelCard";
 import DataTable, { Column } from "@/components/ui/DataTable";
 import {
-  categoriesApi,
-  productsApi,
-  salesApi,
+  categoryApi,
+  productApi,
+  saleApi,
   ApiError,
-  CategoryResponseDto,
-  ProductResponseDto,
-  SaleResponseDto,
+  CategoryResponse,
+  ProductResponse,
+  SaleResponse,
 } from "@/lib/api";
 
 const PALETTE = ["#2980B9", "#E74C3C", "#8E44AD", "#E6B800", "#27AE60", "#16A085", "#D35400"];
@@ -25,20 +25,20 @@ interface CategoryStat {
 }
 
 export default function CategoryReportPage() {
-  const [categories, setCategories] = useState<CategoryResponseDto[]>([]);
-  const [products, setProducts] = useState<ProductResponseDto[]>([]);
-  const [sales, setSales] = useState<SaleResponseDto[]>([]);
+  const [categories, setCategories] = useState<CategoryResponse[]>([]);
+  const [products, setProducts] = useState<ProductResponse[]>([]);
+  const [sales, setSales] = useState<SaleResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    Promise.all([categoriesApi.list(), productsApi.list(), salesApi.list()])
+    Promise.all([categoryApi.getAll(), productApi.getAll(), saleApi.getAll()])
       .then(([c, p, s]) => {
         setCategories(c);
         setProducts(p);
-        setSales(s.filter((sale) => sale.status !== "REFUNDED"));
+        setSales(s.filter((sale: SaleResponse) => sale.status !== "REFUNDED"));
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load report data."))
       .finally(() => setLoading(false));
@@ -54,7 +54,8 @@ export default function CategoryReportPage() {
 
     for (const sale of sales) {
       for (const item of sale.items) {
-        const key = categoryByProductId.get(item.productId) ?? "Uncategorized";
+        const productId = (item as any).productId ?? (item as any).product_id ?? (item as any).product?.id;
+        const key = categoryByProductId.get(productId) ?? "Uncategorized";
         const existing = totals.get(key) ?? { units: 0, revenue: 0 };
         existing.units += item.quantity;
         existing.revenue += item.subtotal;

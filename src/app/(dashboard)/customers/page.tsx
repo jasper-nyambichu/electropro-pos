@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { customerApi, type CustomerResponse } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
+import { isManagerOrAbove } from '@/lib/auth';
 import TableSkeleton from '@/components/ui/TableSkeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import ConfirmModal from '@/components/ui/ConfirmModal';
@@ -28,9 +29,13 @@ export default function CustomersPage() {
   const [deleteTarget, setDeleteTarget] = useState<CustomerResponse | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [page, setPage] = useState(1);
+  const [canDelete, setCanDelete] = useState(false);
   const PER_PAGE = 10;
 
-  useEffect(() => { fetchCustomers(); }, []);
+  useEffect(() => {
+    fetchCustomers();
+    setCanDelete(isManagerOrAbove());
+  }, []);
 
   useEffect(() => {
     const q = search.toLowerCase();
@@ -161,10 +166,12 @@ export default function CustomersPage() {
                             className="p-1.5 hover:bg-surface-container rounded transition-colors" title="View">
                             <span className="material-symbols-outlined text-[18px] text-on-surface-variant">visibility</span>
                           </button>
-                          <button onClick={() => setDeleteTarget(c)}
-                            className="p-1.5 hover:bg-error-container rounded transition-colors" title="Delete">
-                            <span className="material-symbols-outlined text-[18px] text-error">delete</span>
-                          </button>
+                          {canDelete && (
+                            <button onClick={() => setDeleteTarget(c)}
+                              className="p-1.5 hover:bg-error-container rounded transition-colors" title="Delete">
+                              <span className="material-symbols-outlined text-[18px] text-error">delete</span>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -200,14 +207,16 @@ export default function CustomersPage() {
         )}
       </div>
 
-      <ConfirmModal
-        open={!!deleteTarget}
-        title="Delete Customer"
-        message={`"${deleteTarget?.firstname} ${deleteTarget?.lastname}" will be permanently removed along with their associated records.`}
-        onConfirm={handleDelete}
-        onCancel={() => setDeleteTarget(null)}
-        loading={deleting}
-      />
+      {canDelete && (
+        <ConfirmModal
+          open={!!deleteTarget}
+          title="Delete Customer"
+          message={`"${deleteTarget?.firstname} ${deleteTarget?.lastname}" will be permanently removed along with their associated records.`}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+          loading={deleting}
+        />
+      )}
     </div>
   );
 }

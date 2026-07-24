@@ -1,181 +1,171 @@
-// src/app/(dashboard)/customers/warranty/page.tsx
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import DataTable, { Column } from "@/components/ui/DataTable";
-import PanelCard from "@/components/ui/PanelCard";
-import Pagination from "@/components/ui/Pagination";
-import StatBanner from "@/components/ui/StatBanner";
-import { warrantiesApi, ApiError, WarrantyResponseDto } from "@/lib/api";
+import { useEffect, useState } from 'react';
+import { warrantyApi, type WarrantyResponse } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
+import { isManagerOrAbove } from '@/lib/auth';
+import TableSkeleton from '@/components/ui/TableSkeleton';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 
-type DisplayStatus = "Expiring Soon" | "Active" | "Expired";
-
-interface WarrantyRow extends WarrantyResponseDto {
-  daysLeft: number;
-  displayStatus: DisplayStatus;
-}
-
-const STATUS_STYLE: Record<DisplayStatus, { pill: string; daysClass: string; rowClass: string }> = {
-  "Expiring Soon": { pill: "bg-error text-on-error", daysClass: "text-error font-bold", rowClass: "" },
-  Active: { pill: "bg-secondary-container text-on-secondary-container", daysClass: "text-secondary", rowClass: "" },
-  Expired: { pill: "bg-secondary text-white", daysClass: "text-secondary font-bold", rowClass: "opacity-70 bg-surface-container-low" },
-};
-
-function daysUntil(dateStr: string) {
-  const diff = new Date(dateStr).getTime() - Date.now();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-export default function WarrantyTrackerPage() {
-  const [warranties, setWarranties] = useState<WarrantyResponseDto[]>([]);
+export default function WarrantyPage() {
+  const { success, error } = useToast();
+  const [warranties, setWarranties] = useState<WarrantyResponse[]>([]);
+  const [expiring, setExpiring] = useState<WarrantyResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [claimTarget, setClaimTarget] = useState<WarrantyResponse | null>(null);
+  const [claiming, setClaiming] = useState(false);
+  const [activeTab, setActiveTab] = useState<'all' | 'expiring'>('all');
+  const [canClaim, setCanClaim] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    warrantiesApi
-      .list()
-      .then(setWarranties)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load warranties."))
+    setCanClaim(isManagerOrAbove());
+    Promise.all([warrantyApi.getAll(), warrantyApi.getExpiring()])
+      .then(([all, exp]) => { setWarranties(all); setExpiring(exp); })
+      .catch((err: unknown) => error('Failed to load warranties', err instanceof Error ? err.message : undefined))
       .finally(() => setLoading(false));
   }, []);
 
-  const rows: WarrantyRow[] = useMemo(
-    () =>
-      warranties.map((w) => {
-        const daysLeft = daysUntil(w.endDate);
-        const displayStatus: DisplayStatus =
-          daysLeft < 0 ? "Expired" : daysLeft <= 30 ? "Expiring Soon" : "Active";
-        return { ...w, daysLeft, displayStatus };
-      }),
-    [warranties]
-  );
+  async function handleClaim() {
+    if (!claimTarget) return;
+    setClaiming(true);
+    try {
+      const updated = await warrantyApi.claim(claimTarget.id);
+      setWarranties((prev) => prev.map((w) => (w.id === claimTarget.id ? updated : w)));
+      success('Warranty claimed', `Warranty ${claimTarget.warrantyNumber} has been marked as claimed.`);
+      setClaimTarget(null);
+    } catch (err: unknown) {
+      error('Claim failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setClaiming(false);
+    }
+  }
 
-  const expiringSoonCount = rows.filter((r) => r.displayStatus === "Expiring Soon").length;
-  const activeCount = rows.filter((r) => r.displayStatus === "Active").length;
-  const claimsCount = rows.filter((r) => r.status?.toUpperCase() === "CLAIMED").length;
-  const protectionRatio = rows.length ? Math.round((activeCount / rows.length) * 100) : 0;
+  function statusBadge(status: string) {
+    const map: Record<string, string> = {
+      ACTIVE: 'bg-blue-100 text-blue-800 border-blue-200',
+      CLAIMED: 'bg-green-100 text-green-800 border-green-200',
+      EXPIRED: 'bg-gray-100 text-gray-600 border-gray-200',
+    };
+    return (
+      <span className={`px-2 py-0.5 text-[11px] font-bold uppercase rounded-full border ${map[status] ?? 'bg-surface-container text-on-surface-variant'}`}>
+        {status}
+      </span>
+    );
+  }
 
-  const columns: Column<WarrantyRow>[] = [
-    { header: "Customer", render: (w) => <span className="font-body-semibold">{w.customerName}</span> },
-    { header: "Product", render: (w) => w.productName },
-    { header: "Warranty No.", render: (w) => <span className="text-secondary font-mono text-[12px]">{w.warrantyNumber}</span> },
-    { header: "Start Date", render: (w) => formatDate(w.startDate) },
-    {
-      header: "Expiry Date",
-      render: (w) =>
-        w.displayStatus === "Expiring Soon" ? (
-          <span className="font-body-semibold text-error">{formatDate(w.endDate)}</span>
-        ) : (
-          formatDate(w.endDate)
-        ),
-    },
-    {
-      header: "Days Left",
-      render: (w) => (
-        <span className={STATUS_STYLE[w.displayStatus].daysClass}>
-          {w.daysLeft < 0 ? "Expired" : `${w.daysLeft} Days`}
-        </span>
-      ),
-    },
-    {
-      header: "Status",
-      render: (w) => <span className={`status-pill ${STATUS_STYLE[w.displayStatus].pill}`}>{w.displayStatus}</span>,
-    },
-    {
-      header: "Actions",
-      align: "right",
-      render: (w) => (
-        <button className="text-primary hover:underline font-bold text-label-sm">
-          {w.displayStatus === "Expired" ? "Renew" : "Manage"}
-        </button>
-      ),
-    },
-  ];
+  const displayed = activeTab === 'expiring' ? expiring : warranties;
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex justify-between items-center">
+    <div className="p-container_padding">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="font-page-title text-page-title text-on-surface">Warranty Tracker</h1>
-          <p className="text-label-sm text-secondary">
-            Manage customer product warranties and expiration alerts
+          <h1 className="font-page-title text-page-title text-on-background">Warranty Tracker</h1>
+          <p className="text-label-sm text-on-surface-variant mt-0.5">
+            {warranties.length} total · {expiring.length} expiring within 30 days
           </p>
         </div>
-        <div className="flex gap-2">
-          <button className="bg-primary text-on-primary px-3 py-1.5 text-label-sm font-bold rounded flex items-center gap-2 hover:opacity-90 transition-opacity">
-            <span className="material-symbols-outlined text-[16px]">add</span>
-            New Warranty
-          </button>
-          <button className="bg-secondary text-on-primary px-3 py-1.5 text-label-sm font-bold rounded flex items-center gap-2 hover:opacity-90 transition-opacity">
-            <span className="material-symbols-outlined text-[16px]">download</span>
-            Export CSV
-          </button>
-        </div>
       </div>
 
-      {error && (
-        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
-      )}
-
-      {expiringSoonCount > 0 && (
-        <div className="bg-error text-on-error p-3 rounded flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-3">
-            <span className="material-symbols-outlined text-[24px]">warning</span>
-            <div>
-              <p className="font-body-semibold">Attention: {expiringSoonCount} Warranties Expiring Soon</p>
-              <p className="text-[12px] opacity-90">
-                Please review the customers marked in red and initiate follow-up for renewals or
-                maintenance checks.
-              </p>
-            </div>
+      {expiring.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4 flex items-start gap-3">
+          <span className="material-symbols-outlined text-yellow-600 shrink-0">schedule</span>
+          <div>
+            <p className="font-semibold text-yellow-800 text-sm">Warranties Expiring Soon</p>
+            <p className="text-yellow-700 text-xs mt-0.5">
+              {expiring.length} warrant{expiring.length !== 1 ? 'ies' : 'y'} will expire within the next 30 days. Contact customers proactively.
+            </p>
           </div>
-          <button className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded text-[12px] font-bold uppercase transition-colors">
-            View All
+          <button onClick={() => setActiveTab('expiring')}
+            className="ml-auto px-3 py-1 bg-yellow-600 text-white rounded text-xs font-bold hover:bg-yellow-700 transition-colors whitespace-nowrap">
+            View {expiring.length}
           </button>
         </div>
       )}
 
-      <PanelCard
-        title="Customer Warranty List"
-        icon="assignment_turned_in"
-        headerExtra={
-          <div className="flex gap-4">
-            <div className="flex items-center gap-2 text-label-sm text-secondary">
-              <span className="w-3 h-3 rounded-full bg-error"></span> Expiring
-            </div>
-            <div className="flex items-center gap-2 text-label-sm text-secondary">
-              <span className="w-3 h-3 rounded-full bg-secondary"></span> Expired
-            </div>
-            <div className="flex items-center gap-2 text-label-sm text-secondary">
-              <span className="w-3 h-3 rounded-full bg-primary-container"></span> Active
-            </div>
-          </div>
-        }
-      >
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4 border-b border-outline-variant/20">
+        {(['all', 'expiring'] as const).map((tab) => (
+          <button key={tab} onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-semibold transition-colors border-b-2 -mb-px ${
+              activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'
+            }`}>
+            {tab === 'all' ? `All Warranties (${warranties.length})` : `Expiring Soon (${expiring.length})`}
+          </button>
+        ))}
+      </div>
+
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-[18px]">verified_user</span>
+          <span className="font-panel-header text-panel-header">
+            {activeTab === 'expiring' ? 'Expiring Warranties' : 'All Warranties'}
+          </span>
+        </div>
+
         {loading ? (
-          <p className="p-6 text-center text-secondary">Loading warranties…</p>
-        ) : rows.length === 0 ? (
-          <p className="p-6 text-center text-secondary">No warranties recorded yet.</p>
+          <TableSkeleton rows={6} columns={6} />
+        ) : displayed.length === 0 ? (
+          <EmptyState
+            icon="verified_user"
+            title={activeTab === 'expiring' ? 'No warranties expiring soon' : 'No warranties yet'}
+            description={activeTab === 'expiring' ? 'All active warranties are valid for more than 30 days.' : 'Warranties will appear here when registered.'}
+          />
         ) : (
-          <>
-            <DataTable columns={columns} rows={rows} rowKey={(w) => String(w.id)} />
-            <Pagination showingFrom={1} showingTo={rows.length} total={rows.length} currentPage={1} totalPages={1} />
-          </>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-surface-container border-b border-outline-variant/20">
+                <tr>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Warranty #</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Customer</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Product</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Start Date</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Expiry Date</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-center">Status</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {displayed.map((w, idx) => (
+                  <tr key={w.id}
+                    className={`hover:bg-surface-container-low transition-colors ${idx % 2 === 1 ? 'bg-surface-container-lowest' : 'bg-white'}`}>
+                    <td className="px-4 py-3 font-body-semibold text-primary text-sm">{w.warrantyNumber}</td>
+                    <td className="px-4 py-3 text-body-reg text-on-surface">{w.customerName}</td>
+                    <td className="px-4 py-3 text-body-reg text-on-surface-variant">{w.productName}</td>
+                    <td className="px-4 py-3 text-body-reg text-on-surface-variant">
+                      {w.startDate ? new Date(w.startDate).toLocaleDateString('en-KE') : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-body-reg text-on-surface-variant">
+                      {w.endDate ? new Date(w.endDate).toLocaleDateString('en-KE') : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-center">{statusBadge(w.status)}</td>
+                    <td className="px-4 py-3 text-right">
+                      {w.status === 'ACTIVE' && canClaim && (
+                        <button onClick={() => setClaimTarget(w)}
+                          className="px-3 py-1 bg-primary text-on-primary rounded text-xs font-bold hover:brightness-110 transition-all">
+                          Claim
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </PanelCard>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatBanner value={`${rows.length}`} label="Total Registered" icon="inventory_2" bgColor="bg-primary" footerText="" />
-        <StatBanner value={`${expiringSoonCount}`} label="Expiring 30 Days" icon="timer" bgColor="bg-error" footerText="" />
-        <StatBanner value={`${claimsCount}`} label="Claims Filed" icon="block" bgColor="bg-secondary" footerText="" />
-        <StatBanner value={`${protectionRatio}%`} label="Protection Ratio" icon="verified_user" bgColor="bg-on-secondary-fixed-variant" footerText="" />
       </div>
+
+      {canClaim && (
+        <ConfirmModal
+          open={!!claimTarget}
+          title="Process Warranty Claim"
+          message={`Mark warranty ${claimTarget?.warrantyNumber} for ${claimTarget?.customerName} as claimed? This will update the warranty status to CLAIMED.`}
+          confirmLabel="Process Claim"
+          onConfirm={handleClaim}
+          onCancel={() => setClaimTarget(null)}
+          loading={claiming}
+        />
+      )}
     </div>
   );
 }

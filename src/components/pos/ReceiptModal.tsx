@@ -160,7 +160,7 @@ export default function ReceiptModal({
 
             {/* Footer */}
             <p className="text-center text-xs italic text-on-surface-variant">
-              "Thank you for your purchase!"
+              &ldquo;Thank you for your purchase!&rdquo;
             </p>
           </div>
         </div>

@@ -1,151 +1,197 @@
-// src/app/(dashboard)/purchases/suppliers/page.tsx
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import StatBanner from "@/components/ui/StatBanner";
-import DataTable, { Column } from "@/components/ui/DataTable";
-import PanelCard from "@/components/ui/PanelCard";
-import Pagination from "@/components/ui/Pagination";
-import {
-  suppliersApi,
-  purchaseOrdersApi,
-  ApiError,
-  SupplierResponseDto,
-  PurchaseOrderResponseDto,
-} from "@/lib/api";
+import { useEffect, useState } from 'react';
+import { supplierApi, type SupplierResponse, type SupplierRequest } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
+import TableSkeleton from '@/components/ui/TableSkeleton';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 
-interface SupplierRow extends SupplierResponseDto {
-  totalPurchased: number;
-  lastOrder: string | null;
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
-}
+const EMPTY_FORM: SupplierRequest = { name: '', contactPerson: '', email: '', phone: '' };
 
 export default function SuppliersPage() {
-  const [suppliers, setSuppliers] = useState<SupplierResponseDto[]>([]);
-  const [orders, setOrders] = useState<PurchaseOrderResponseDto[]>([]);
+  const { success, error } = useToast();
+  const [suppliers, setSuppliers] = useState<SupplierResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<SupplierResponse | null>(null);
+  const [form, setForm] = useState<SupplierRequest>(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SupplierResponse | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([suppliersApi.list(), purchaseOrdersApi.list()])
-      .then(([s, o]) => {
-        setSuppliers(s);
-        setOrders(o);
-      })
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load suppliers."))
+    supplierApi.getAll()
+      .then(setSuppliers)
+      .catch((err: unknown) => error('Failed to load suppliers', err instanceof Error ? err.message : undefined))
       .finally(() => setLoading(false));
   }, []);
 
-  const rows: SupplierRow[] = useMemo(() => {
-    return suppliers.map((s) => {
-      const supplierOrders = orders.filter((o) => o.supplierName === s.name);
-      const totalPurchased = supplierOrders.reduce((sum, o) => sum + o.totalAmount, 0);
-      const lastOrder = supplierOrders.length
-        ? supplierOrders.reduce((latest, o) => (o.orderDate > latest ? o.orderDate : latest), supplierOrders[0].orderDate)
-        : null;
-      return { ...s, totalPurchased, lastOrder };
-    });
-  }, [suppliers, orders]);
+  function openAdd() { setEditing(null); setForm(EMPTY_FORM); setShowForm(true); }
+  function openEdit(s: SupplierResponse) {
+    setEditing(s);
+    setForm({ name: s.name, contactPerson: s.contactPerson, email: s.email, phone: s.phone });
+    setShowForm(true);
+  }
 
-  const totalSpend = rows.reduce((sum, r) => sum + r.totalPurchased, 0);
-  const pendingOrders = orders.filter((o) => o.status?.toUpperCase() !== "RECEIVED").length;
-  const topPartner = rows.length
-    ? rows.reduce((top, r) => (r.totalPurchased > top.totalPurchased ? r : top), rows[0]).name
-    : "—";
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      if (editing) {
+        const updated = await supplierApi.update(editing.id, form);
+        setSuppliers((prev) => prev.map((s) => (s.id === editing.id ? updated : s)));
+        success('Supplier updated', `${form.name} has been updated.`);
+      } else {
+        const created = await supplierApi.create(form);
+        setSuppliers((prev) => [...prev, created]);
+        success('Supplier added', `${form.name} has been added.`);
+      }
+      setShowForm(false);
+    } catch (err: unknown) {
+      error('Save failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setSaving(false);
+    }
+  }
 
-  const columns: Column<SupplierRow>[] = [
-    { header: "Supplier Name", render: (s) => <span className="font-body-semibold">{s.name}</span> },
-    { header: "Contact", render: (s) => s.contactPerson || "—" },
-    { header: "Phone", render: (s) => s.phone || "—" },
-    {
-      // No supplier↔product-category relation exists on the backend yet
-      header: "Products Supplied",
-      render: () => <span className="text-secondary text-label-sm">Not tracked</span>,
-    },
-    {
-      header: "Total Purchased (KES)",
-      align: "right",
-      render: (s) => s.totalPurchased.toLocaleString(),
-    },
-    { header: "Last Order", render: (s) => (s.lastOrder ? formatDate(s.lastOrder) : "—") },
-    {
-      header: "Actions",
-      align: "center",
-      render: () => (
-        <div className="flex justify-center gap-2">
-          <button className="text-blue-600 hover:text-blue-800">
-            <span className="material-symbols-outlined text-[18px]">visibility</span>
-          </button>
-          <button className="text-secondary hover:text-primary">
-            <span className="material-symbols-outlined text-[18px]">edit</span>
-          </button>
-        </div>
-      ),
-    },
-  ];
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await supplierApi.delete(deleteTarget.id);
+      setSuppliers((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      success('Supplier removed', `${deleteTarget.name} has been deleted.`);
+      setDeleteTarget(null);
+    } catch (err: unknown) {
+      error('Delete failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function set(key: keyof SupplierRequest, value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="p-container_padding">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="font-page-title text-page-title text-on-background">Suppliers</h1>
-          <p className="text-label-sm font-label-sm text-secondary">
-            Manage your relationship with inventory providers
-          </p>
+          <p className="text-label-sm text-on-surface-variant mt-0.5">{suppliers.length} suppliers</p>
         </div>
-        <button className="bg-primary hover:bg-primary-fixed-dim text-on-primary px-4 py-2 flex items-center gap-2 rounded-lg shadow-sm transition-all active:opacity-90">
-          <span className="material-symbols-outlined">person_add</span>
-          <span className="font-body-semibold text-body-semibold">Add Supplier</span>
+        <button onClick={openAdd}
+          className="bg-primary text-on-primary px-4 py-2 rounded-lg font-body-semibold flex items-center gap-2 hover:brightness-110 transition-all shadow-sm self-start">
+          <span className="material-symbols-outlined text-[18px]">add</span>
+          Add Supplier
         </button>
       </div>
 
-      {error && (
-        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
+      {showForm && (
+        <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm p-5 mb-6">
+          <h2 className="font-panel-header text-panel-header mb-4">{editing ? 'Edit Supplier' : 'New Supplier'}</h2>
+          <form onSubmit={handleSave}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              {([
+                { key: 'name', label: 'Company Name', placeholder: 'TechSupply Kenya', required: true },
+                { key: 'contactPerson', label: 'Contact Person', placeholder: 'Alice Mwangi', required: true },
+                { key: 'email', label: 'Email', placeholder: 'alice@company.co.ke', required: true, type: 'email' },
+                { key: 'phone', label: 'Phone', placeholder: '0722 000 111', required: false},
+              ] as const).map((field) => (
+                <div key={field.key}>
+                  <label className="block text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">
+                    {field.label}{field.required ? ' *' : ''}
+                  </label>
+                  <input
+                    required={field.required}
+                    // type={field.type || 'text'}
+                    value={form[field.key]}
+                    onChange={(e) => set(field.key, e.target.value)}
+                    placeholder={field.placeholder}
+                    className="w-full border border-outline-variant rounded-lg px-3 py-2 text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button type="button" onClick={() => setShowForm(false)}
+                className="px-5 py-2 border border-outline-variant text-on-surface-variant rounded-lg font-body-semibold hover:bg-surface-container transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={saving}
+                className="px-6 py-2 bg-primary text-on-primary rounded-lg font-body-semibold hover:brightness-110 transition-all flex items-center gap-2 disabled:opacity-60">
+                {saving && <span className="material-symbols-outlined animate-spin text-base">progress_activity</span>}
+                {editing ? 'Update' : 'Add Supplier'}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-[15px]">
-        <StatBanner value={String(suppliers.length)} label="Total Suppliers" icon="factory" bgColor="bg-blue-600" footerText="" />
-        <StatBanner value={String(pendingOrders)} label="Pending Orders" icon="local_shipping" bgColor="bg-primary-container" footerText="" />
-        <StatBanner value={`KES ${totalSpend.toLocaleString()}`} label="Total Spend" icon="payments" bgColor="bg-green-600" footerText="" />
-        <StatBanner value={topPartner} label="Top Partner" icon="verified" bgColor="bg-on-secondary-fixed-variant" footerText="" />
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-[18px]">local_shipping</span>
+          <span className="font-panel-header text-panel-header">Supplier Directory</span>
+        </div>
+
+        {loading ? (
+          <TableSkeleton rows={5} columns={5} />
+        ) : suppliers.length === 0 ? (
+          <EmptyState icon="local_shipping" title="No suppliers yet" description="Add your first supplier to start managing purchase orders." actionLabel="Add Supplier" onAction={openAdd} />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-surface-container border-b border-outline-variant/20">
+                <tr>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Company</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Contact Person</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Email</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Phone</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {suppliers.map((s, idx) => (
+                  <tr key={s.id}
+                    className={`hover:bg-surface-container-low transition-colors ${idx % 2 === 1 ? 'bg-surface-container-lowest' : 'bg-white'}`}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-secondary-container flex items-center justify-center shrink-0">
+                          <span className="material-symbols-outlined text-on-secondary-container text-base">business</span>
+                        </div>
+                        <span className="font-body-semibold text-on-surface">{s.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-body-reg text-on-surface-variant">{s.contactPerson}</td>
+                    <td className="px-4 py-3 text-body-reg text-primary">{s.email}</td>
+                    <td className="px-4 py-3 text-body-reg text-on-surface-variant">{s.phone}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => openEdit(s)} className="p-1.5 hover:bg-surface-container rounded transition-colors">
+                          <span className="material-symbols-outlined text-[18px] text-on-surface-variant">edit</span>
+                        </button>
+                        <button onClick={() => setDeleteTarget(s)} className="p-1.5 hover:bg-error-container rounded transition-colors">
+                          <span className="material-symbols-outlined text-[18px] text-error">delete</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      <PanelCard
-        title="Supplier Directory"
-        icon="list_alt"
-        headerExtra={
-          <div className="flex gap-2">
-            <button className="text-label-sm font-label-sm px-2 py-1 border border-outline-variant hover:bg-surface-container transition-colors rounded">
-              Export CSV
-            </button>
-            <button className="text-label-sm font-label-sm px-2 py-1 border border-outline-variant hover:bg-surface-container transition-colors rounded">
-              Print
-            </button>
-          </div>
-        }
-      >
-        {loading ? (
-          <p className="p-6 text-center text-secondary">Loading suppliers…</p>
-        ) : rows.length === 0 ? (
-          <p className="p-6 text-center text-secondary">No suppliers registered yet.</p>
-        ) : (
-          <>
-            <DataTable columns={columns} rows={rows} rowKey={(s) => String(s.id)} />
-            <Pagination
-              showingFrom={rows.length ? 1 : 0}
-              showingTo={rows.length}
-              total={rows.length}
-              currentPage={1}
-              totalPages={1}
-            />
-          </>
-        )}
-      </PanelCard>
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Remove Supplier"
+        message={`"${deleteTarget?.name}" will be permanently removed. Existing purchase orders linked to this supplier will remain.`}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deleting}
+      />
     </div>
   );
 }

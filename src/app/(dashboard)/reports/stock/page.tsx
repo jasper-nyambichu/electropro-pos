@@ -1,161 +1,140 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import DataTable, { Column } from "@/components/ui/DataTable";
-import PanelCard from "@/components/ui/PanelCard";
-import { productsApi, ApiError, ProductResponseDto } from "@/lib/api";
-
-const PALETTE = ["#2980B9", "#E74C3C", "#8E44AD", "#E6B800", "#27AE60", "#16A085", "#D35400"];
+import { useEffect, useState } from 'react';
+import { reportApi, type ProductResponse } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
+import TableSkeleton from '@/components/ui/TableSkeleton';
+import EmptyState from '@/components/ui/EmptyState';
 
 export default function StockReportPage() {
-  const [products, setProducts] = useState<ProductResponseDto[]>([]);
+  const { error } = useToast();
+  const [products, setProducts] = useState<ProductResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    productsApi
-      .list()
+    reportApi.getStock()
       .then(setProducts)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load stock report."))
+      .catch((err: unknown) => error('Failed to load stock report', err instanceof Error ? err.message : undefined))
       .finally(() => setLoading(false));
   }, []);
 
-  const totalValue = products.reduce((sum, p) => sum + p.price * p.quantity, 0);
-  const lowStockCount = products.filter((p) => p.quantity > 0 && p.quantity <= p.lowStockThreshold).length;
-  const outOfStockCount = products.filter((p) => p.quantity <= 0).length;
+  const filtered = search
+    ? products.filter(
+        (p) =>
+          p.name.toLowerCase().includes(search.toLowerCase()) ||
+          p.categoryName?.toLowerCase().includes(search.toLowerCase())
+      )
+    : products;
 
-  const categoryValues = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const p of products) {
-      const key = p.categoryName ?? "Uncategorized";
-      totals.set(key, (totals.get(key) ?? 0) + p.price * p.quantity);
-    }
-    return Array.from(totals.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([label, value], i) => ({ label, value, color: PALETTE[i % PALETTE.length] }));
-  }, [products]);
-
-  const filtered = products.filter(
-    (p) =>
-      search.trim() === "" ||
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase())
+  const totalValue = products.reduce(
+    (sum, p) => sum + Number(p.quantity) * Number(p.price), 0
   );
 
-  const columns: Column<ProductResponseDto>[] = [
-    {
-      header: "Product",
-      render: (p) => (
-        <span className={`font-body-semibold ${p.quantity <= 0 ? "text-error" : ""}`}>{p.name}</span>
-      ),
-    },
-    { header: "SKU", render: (p) => <span className="font-mono text-[12px] text-secondary">{p.sku}</span> },
-    { header: "Category", render: (p) => p.categoryName ?? "Uncategorized" },
-    {
-      header: "Current Stock",
-      align: "right",
-      render: (p) =>
-        p.quantity <= p.lowStockThreshold ? (
-          <span className="text-error font-bold">{p.quantity}</span>
-        ) : (
-          p.quantity
-        ),
-    },
-    { header: "Unit Price", align: "right", render: (p) => p.price.toLocaleString() },
-    { header: "Total Value", align: "right", render: (p) => <span className="font-body-semibold">{(p.price * p.quantity).toLocaleString()}</span> },
-  ];
+  const fmt = (n: number) =>
+    `KES ${Number(n).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
+
+  function statusBadge(p: ProductResponse) {
+    if (p.quantity <= 0)
+      return <span className="px-2 py-0.5 text-[11px] font-bold uppercase rounded-full bg-error text-on-error">Out of Stock</span>;
+    if (p.quantity <= p.lowStockThreshold)
+      return <span className="px-2 py-0.5 text-[11px] font-bold uppercase rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">Low Stock</span>;
+    return <span className="px-2 py-0.5 text-[11px] font-bold uppercase rounded-full bg-green-100 text-green-800 border border-green-200">Healthy</span>;
+  }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex justify-between items-end">
+    <div className="p-container_padding">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="font-page-title text-page-title text-on-surface">Stock Report</h1>
-          <p className="text-secondary font-body-reg">Detailed inventory analytics and stock health status.</p>
+          <h1 className="font-page-title text-page-title text-on-background">Stock Report</h1>
+          <p className="text-label-sm text-on-surface-variant mt-0.5">Inventory valuation and stock health</p>
         </div>
+        <button onClick={() => window.print()}
+          className="flex items-center gap-2 px-4 py-2 border border-outline-variant text-on-surface-variant rounded-lg font-body-semibold hover:bg-surface-container transition-colors self-start">
+          <span className="material-symbols-outlined text-[18px]">print</span>
+          Export
+        </button>
       </div>
 
-      {error && (
-        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
+      {/* Total stock value banner */}
+      {!loading && (
+        <div className="bg-primary text-on-primary rounded-lg p-5 mb-6 flex items-center justify-between shadow-sm">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest opacity-80">Total Stock Value</p>
+            <p className="text-3xl font-bold mt-1">{fmt(totalValue)}</p>
+          </div>
+          <span className="material-symbols-outlined text-6xl opacity-20">inventory</span>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[15px]">
-        <div className="bg-[#00c0ef] text-white rounded-sm overflow-hidden relative shadow-sm h-24 flex flex-col justify-center">
-          <div className="p-4 relative z-10">
-            <h3 className="font-tile-number text-tile-number">{products.length}</h3>
-            <p className="font-body-reg opacity-90">Total Products</p>
-          </div>
-          <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 select-none">inventory_2</span>
-        </div>
-        <div className="bg-[#00a65a] text-white rounded-sm overflow-hidden relative shadow-sm h-24 flex flex-col justify-center">
-          <div className="p-4 relative z-10">
-            <h3 className="font-tile-number text-tile-number">KES {Math.round(totalValue).toLocaleString()}</h3>
-            <p className="font-body-reg opacity-90">Stock Value</p>
-          </div>
-          <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 select-none">payments</span>
-        </div>
-        <div className="bg-[#f39c12] text-white rounded-sm overflow-hidden relative shadow-sm h-24 flex flex-col justify-center">
-          <div className="p-4 relative z-10">
-            <h3 className="font-tile-number text-tile-number">{lowStockCount}</h3>
-            <p className="font-body-reg opacity-90">Low Stock</p>
-          </div>
-          <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 select-none">warning</span>
-        </div>
-        <div className="bg-[#dd4b39] text-white rounded-sm overflow-hidden relative shadow-sm h-24 flex flex-col justify-center">
-          <div className="p-4 relative z-10">
-            <h3 className="font-tile-number text-tile-number">{outOfStockCount}</h3>
-            <p className="font-body-reg opacity-90">Out of Stock</p>
-          </div>
-          <span className="material-symbols-outlined absolute right-2 top-2 text-[60px] opacity-20 select-none">error</span>
+      {/* Search */}
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm p-4 mb-4">
+        <div className="relative max-w-md">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-on-surface-variant/50 text-[18px]">search</span>
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search product or category…"
+            className="w-full pl-9 pr-4 py-2 border border-outline-variant rounded-lg text-body-reg focus:ring-2 focus:ring-primary outline-none transition-all" />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-[15px]">
-        <div className="lg:col-span-4">
-          <PanelCard title="Stock Value by Category" icon="pie_chart">
-            <div className="p-5">
-              {categoryValues.length === 0 ? (
-                <p className="text-center text-secondary">No stock data yet.</p>
-              ) : (
-                <div className="w-full space-y-2">
-                  {categoryValues.map((c) => (
-                    <div key={c.label} className="flex justify-between items-center text-label-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: c.color }}></span>
-                        <span>{c.label}</span>
-                      </div>
-                      <span className="font-body-semibold">KES {Math.round(c.value).toLocaleString()}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </PanelCard>
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-[18px]">inventory</span>
+          <span className="font-panel-header text-panel-header">Inventory Status — {filtered.length} products</span>
         </div>
 
-        <div className="lg:col-span-8">
-          <PanelCard
-            title="Inventory Status"
-            icon="list_alt"
-            headerExtra={
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="border border-outline-variant text-[12px] px-2 py-1 rounded-sm w-40 focus:ring-1 focus:ring-primary"
-                placeholder="Filter products..."
-                type="text"
-              />
-            }
-          >
-            {loading ? (
-              <p className="p-6 text-center text-secondary">Loading…</p>
-            ) : (
-              <DataTable columns={columns} rows={filtered} rowKey={(p) => String(p.id)} />
-            )}
-          </PanelCard>
-        </div>
+        {loading ? (
+          <TableSkeleton rows={8} columns={6} />
+        ) : filtered.length === 0 ? (
+          <EmptyState icon="inventory" title="No products found" description="Add products to your inventory to see the stock report." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-surface-container border-b border-outline-variant/20">
+                <tr>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Product</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Category</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Qty</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Unit Price</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Stock Value</th>
+                  <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/10">
+                {filtered.map((p, idx) => (
+                  <tr key={p.id}
+                    className={`hover:bg-surface-container-low transition-colors ${
+                      p.quantity <= 0 ? 'border-l-4 border-error' : p.quantity <= p.lowStockThreshold ? 'border-l-4 border-yellow-400' : ''
+                    } ${idx % 2 === 1 ? 'bg-surface-container-lowest' : 'bg-white'}`}>
+                    <td className="px-4 py-3 font-body-semibold text-on-surface">{p.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 text-[11px] font-bold uppercase rounded-full bg-secondary-container text-on-secondary-container">
+                        {p.categoryName || '—'}
+                      </span>
+                    </td>
+                    <td className={`px-4 py-3 text-right font-bold ${p.quantity <= 0 ? 'text-error' : 'text-on-surface'}`}>
+                      {p.quantity}
+                    </td>
+                    <td className="px-4 py-3 text-right text-on-surface-variant text-body-reg">
+                      {fmt(Number(p.price))}
+                    </td>
+                    <td className="px-4 py-3 text-right font-body-semibold text-on-surface">
+                      {fmt(Number(p.quantity) * Number(p.price))}
+                    </td>
+                    <td className="px-4 py-3 text-center">{statusBadge(p)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-surface-container border-t border-outline-variant/20">
+                <tr>
+                  <td colSpan={4} className="px-4 py-3 font-bold text-on-surface text-right">Grand Total</td>
+                  <td className="px-4 py-3 text-right font-bold text-primary text-lg">{fmt(totalValue)}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

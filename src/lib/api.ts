@@ -182,6 +182,17 @@ export const saleItemApi = {
     }),
 };
 
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+export const settingsApi = {
+  get: () => request<SettingsResponseDto>('/settings'),
+  update: (data: SettingsDto) =>
+    request<SettingsResponseDto>('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+};
+
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 
 export const supplierApi = {
@@ -378,6 +389,22 @@ export interface CustomerResponse {
 export interface SaleRequest {
   customerId?: number;
   paymentMethod: string;
+}
+
+export interface SettingsDto {
+  businessName: string;
+  kraPin: string;
+  address: string;
+  currency: string;
+  timezone: string;
+  receiptHeaderText: string;
+  receiptFooterText: string;
+  autoGenerateSerialNumbers: boolean;
+  thermalPrinterMode: boolean;
+}
+
+export interface SettingsResponseDto extends SettingsDto {
+  id: number;
 }
 
 export interface SaleResponse {

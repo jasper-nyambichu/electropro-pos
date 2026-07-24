@@ -1,277 +1,204 @@
-// src/app/(dashboard)/purchases/page.tsx
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Avatar from "@/components/ui/Avatar";
-import StatBanner from "@/components/ui/StatBanner";
-import DataTable, { Column } from "@/components/ui/DataTable";
-import PanelCard from "@/components/ui/PanelCard";
-import {
-  purchaseOrdersApi,
-  suppliersApi,
-  ApiError,
-  PurchaseOrderResponseDto,
-  SupplierResponseDto,
-} from "@/lib/api";
-import { useToast } from "@/context/ToastContext";
-
-const AVATAR_PALETTE = [
-  { bg: "bg-blue-100", text: "text-blue-700" },
-  { bg: "bg-red-100", text: "text-red-700" },
-  { bg: "bg-purple-100", text: "text-purple-700" },
-  { bg: "bg-yellow-100", text: "text-yellow-700" },
-  { bg: "bg-gray-200", text: "text-gray-700" },
-  { bg: "bg-green-100", text: "text-green-700" },
-  { bg: "bg-cyan-100", text: "text-cyan-700" },
-];
-
-function colorFor(name: string) {
-  const hash = name.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
-  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
-}
-
-const STATUS_STYLE: Record<string, { badge: string; border: string }> = {
-  RECEIVED: { badge: "bg-green-100 text-green-700", border: "border-green-200" },
-  ORDERED: { badge: "bg-orange-100 text-orange-700", border: "border-orange-200" },
-  PARTIAL: { badge: "bg-blue-100 text-blue-700", border: "border-blue-200" },
-};
-
-function statusLabel(status: string) {
-  return status.charAt(0) + status.slice(1).toLowerCase();
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", year: "numeric" });
-}
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { purchaseOrderApi, type PurchaseOrderResponse } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
+import TableSkeleton from '@/components/ui/TableSkeleton';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmModal from '@/components/ui/ConfirmModal';
 
 export default function PurchasesPage() {
-  const toast = useToast();
-  const [orders, setOrders] = useState<PurchaseOrderResponseDto[]>([]);
-  const [suppliers, setSuppliers] = useState<SupplierResponseDto[]>([]);
+  const router = useRouter();
+  const { success, error } = useToast();
+  const [orders, setOrders] = useState<PurchaseOrderResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [o, s] = await Promise.all([purchaseOrdersApi.list(), suppliersApi.list()]);
-      setOrders(o);
-      setSuppliers(s);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load purchase orders.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [receiveTarget, setReceiveTarget] = useState<PurchaseOrderResponse | null>(null);
+  const [receiving, setReceiving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<PurchaseOrderResponse | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 10;
 
   useEffect(() => {
-    load();
+    purchaseOrderApi.getAll()
+      .then(setOrders)
+      .catch((err: unknown) => error('Failed to load purchase orders', err instanceof Error ? err.message : undefined))
+      .finally(() => setLoading(false));
   }, []);
 
-  const totalOrders = orders.length;
-  const pendingCount = orders.filter((o) => o.status?.toUpperCase() === "ORDERED").length;
-  const receivedCount = orders.filter((o) => o.status?.toUpperCase() === "RECEIVED").length;
-  const avgOrderValue = orders.length
-    ? orders.reduce((sum, o) => sum + o.totalAmount, 0) / orders.length
-    : 0;
-
-  async function handleReceive(o: PurchaseOrderResponseDto) {
-    if (o.status?.toUpperCase() === "RECEIVED") return;
-    if (!confirm(`Mark PO #${o.id} as received? This should update stock levels.`)) return;
+  async function handleReceive() {
+    if (!receiveTarget) return;
+    setReceiving(true);
     try {
-      await purchaseOrdersApi.receive(o.id);
-      toast.success(`PO #${o.id} marked as received.`);
-      await load();
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not update purchase order.");
+      const updated = await purchaseOrderApi.receive(receiveTarget.id);
+      setOrders((prev) => prev.map((o) => (o.id === receiveTarget.id ? updated : o)));
+      success('Order received', `Purchase order #${receiveTarget.id} marked as received.`);
+      setReceiveTarget(null);
+    } catch (err: unknown) {
+      error('Failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setReceiving(false);
     }
   }
 
-  const monthlySpend = useMemo(() => {
-    const months: { label: string; total: number }[] = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const label = d.toLocaleDateString("en-US", { month: "short" });
-      const monthKey = d.toISOString().slice(0, 7);
-      const total = orders
-        .filter((o) => o.orderDate.slice(0, 7) === monthKey)
-        .reduce((sum, o) => sum + o.totalAmount, 0);
-      months.push({ label, total });
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await purchaseOrderApi.delete(deleteTarget.id);
+      setOrders((prev) => prev.filter((o) => o.id !== deleteTarget.id));
+      success('Order cancelled', `Purchase order #${deleteTarget.id} has been removed.`);
+      setDeleteTarget(null);
+    } catch (err: unknown) {
+      error('Delete failed', err instanceof Error ? err.message : undefined);
+    } finally {
+      setDeleting(false);
     }
-    const max = Math.max(...months.map((m) => m.total), 1);
-    return months.map((m) => ({ ...m, pct: Math.round((m.total / max) * 100) || 2 }));
-  }, [orders]);
+  }
 
-  const columns: Column<PurchaseOrderResponseDto>[] = [
-    { header: "PO Number", render: (o) => <span className="font-body-semibold">PO-{String(o.id).padStart(4, "0")}</span> },
-    {
-      header: "Supplier",
-      render: (o) => {
-        const c = colorFor(o.supplierName);
-        return (
-          <div className="flex items-center gap-2">
-            <div className={`w-6 h-6 rounded-full ${c.bg} flex items-center justify-center text-[10px] ${c.text} font-bold`}>
-              {o.supplierName?.[0]?.toUpperCase() ?? "?"}
-            </div>
-            {o.supplierName}
-          </div>
-        );
-      },
-    },
-    {
-      header: "Items",
-      render: (o) => o.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ") || "—",
-    },
-    { header: "Total Cost (KES)", render: (o) => <span className="font-mono">{o.totalAmount.toLocaleString()}</span> },
-    {
-      header: "Status",
-      align: "center",
-      render: (o) => {
-        const key = o.status?.toUpperCase() ?? "";
-        const style = STATUS_STYLE[key] ?? { badge: "bg-gray-100 text-gray-700", border: "border-gray-200" };
-        return (
-          <span className={`${style.badge} text-[11px] font-bold px-2 py-0.5 rounded uppercase border ${style.border}`}>
-            {statusLabel(o.status ?? "Unknown")}
-          </span>
-        );
-      },
-    },
-    {
-      header: "Actions",
-      align: "right",
-      render: (o) => (
-        <div className="flex justify-end gap-2">
-          <button className="text-secondary hover:text-primary transition-colors" title="View">
-            <span className="material-symbols-outlined text-[20px]">visibility</span>
-          </button>
-          <button
-            onClick={() => handleReceive(o)}
-            disabled={o.status?.toUpperCase() === "RECEIVED"}
-            className={`transition-colors ${
-              o.status?.toUpperCase() === "RECEIVED"
-                ? "text-secondary opacity-30 cursor-default"
-                : "text-secondary hover:text-primary"
-            }`}
-            title={o.status?.toUpperCase() === "RECEIVED" ? "Already received" : "Mark received"}
-          >
-            <span className="material-symbols-outlined text-[20px]">inventory_2</span>
-          </button>
-        </div>
-      ),
-    },
-  ];
+  function statusBadge(status: string) {
+    const map: Record<string, string> = {
+      PENDING: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      RECEIVED: 'bg-green-100 text-green-800 border-green-200',
+      CANCELLED: 'bg-red-100 text-red-700 border-red-200',
+    };
+    return (
+      <span className={`px-2 py-0.5 text-[11px] font-bold uppercase rounded-full border ${map[status] ?? 'bg-surface-container text-on-surface-variant'}`}>
+        {status}
+      </span>
+    );
+  }
+
+  const fmt = (n: number) =>
+    `KES ${Number(n).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
+
+  const totalPages = Math.ceil(orders.length / PER_PAGE);
+  const paginated = orders.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   return (
-    <div className="flex flex-col gap-[20px]">
-      <div className="flex justify-between items-center">
+    <div className="p-container_padding">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="font-page-title text-page-title text-on-background">Purchase Orders</h1>
-          <p className="text-label-sm text-secondary font-label-sm">
-            Manage inventory procurement and supplier interactions.
-          </p>
+          <p className="text-label-sm text-on-surface-variant mt-0.5">{orders.length} orders</p>
         </div>
-        <button className="bg-primary text-on-primary flex items-center gap-2 px-4 py-2 rounded shadow-sm hover:opacity-90 transition-opacity font-body-semibold">
-          <span className="material-symbols-outlined text-[18px]">add</span>
-          New PO
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => router.push('/purchases/suppliers')}
+            className="px-4 py-2 border border-outline-variant text-on-surface-variant rounded-lg font-body-semibold flex items-center gap-2 hover:bg-surface-container transition-colors">
+            <span className="material-symbols-outlined text-[18px]">local_shipping</span>
+            Suppliers
+          </button>
+          <button onClick={() => router.push('/purchases/add')}
+            className="bg-primary text-on-primary px-4 py-2 rounded-lg font-body-semibold flex items-center gap-2 hover:brightness-110 transition-all shadow-sm">
+            <span className="material-symbols-outlined text-[18px]">add</span>
+            New Order
+          </button>
+        </div>
       </div>
 
-      {error && (
-        <div className="bg-error-container/20 border border-error text-error rounded p-3 text-label-sm">{error}</div>
-      )}
+      <div className="bg-white border border-outline-variant/30 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary text-[18px]">shopping_cart</span>
+          <span className="font-panel-header text-panel-header">Purchase Orders</span>
+        </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-[15px]">
-        <StatBanner value={totalOrders.toString()} label="Total Orders" icon="shopping_basket" bgColor="bg-blue-600" footerText="" />
-        <StatBanner value={pendingCount.toString()} label="Pending" icon="pending_actions" bgColor="bg-orange-500" footerText="Needs attention" />
-        <StatBanner value={receivedCount.toString()} label="Received" icon="verified" bgColor="bg-green-600" footerText="In stock" />
-        <StatBanner
-          value={`KES ${Math.round(avgOrderValue).toLocaleString()}`}
-          label="Avg Order Value"
-          icon="query_stats"
-          bgColor="bg-red-600"
-          footerText=""
-        />
-      </div>
-
-      <PanelCard
-        title="Purchase Order List"
-        icon="list_alt"
-        headerExtra={
-          <div className="flex gap-2">
-            <button className="bg-white border border-outline-variant/30 text-secondary text-label-sm px-3 py-1 rounded flex items-center gap-1 hover:bg-surface transition-colors">
-              <span className="material-symbols-outlined text-[16px]">filter_list</span> Filter
-            </button>
-            <button className="bg-white border border-outline-variant/30 text-secondary text-label-sm px-3 py-1 rounded flex items-center gap-1 hover:bg-surface transition-colors">
-              <span className="material-symbols-outlined text-[16px]">download</span> Export
-            </button>
-          </div>
-        }
-      >
         {loading ? (
-          <p className="p-6 text-center text-secondary">Loading purchase orders…</p>
+          <TableSkeleton rows={6} columns={6} />
         ) : orders.length === 0 ? (
-          <p className="p-6 text-center text-secondary">No purchase orders yet.</p>
+          <EmptyState icon="shopping_cart" title="No purchase orders yet"
+            description="Create your first purchase order to start tracking supplier deliveries."
+            actionLabel="New Order" onAction={() => router.push('/purchases/add')} />
         ) : (
           <>
-            <DataTable columns={columns} rows={orders} rowKey={(o) => String(o.id)} />
-            <div className="px-[15px] py-[10px] bg-[#F4F4F4] border-t border-[#EEEEEE] flex justify-between items-center">
-              <span className="text-label-sm font-label-sm text-secondary">
-                Showing {orders.length} of {orders.length} entries
-              </span>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-surface-container border-b border-outline-variant/20">
+                  <tr>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Order #</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Supplier</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant">Order Date</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Total</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-center">Status</th>
+                    <th className="px-4 py-3 font-panel-header text-panel-header text-on-surface-variant text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-outline-variant/10">
+                  {paginated.map((o, idx) => (
+                    <tr key={o.id}
+                      className={`hover:bg-surface-container-low transition-colors ${idx % 2 === 1 ? 'bg-surface-container-lowest' : 'bg-white'}`}>
+                      <td className="px-4 py-3 font-body-semibold text-primary">#{o.id}</td>
+                      <td className="px-4 py-3 text-body-reg text-on-surface">{o.supplierName}</td>
+                      <td className="px-4 py-3 text-body-reg text-on-surface-variant">
+                        {o.orderDate ? new Date(o.orderDate).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right font-body-semibold text-on-surface">
+                        {fmt(Number(o.totalAmount || 0))}
+                      </td>
+                      <td className="px-4 py-3 text-center">{statusBadge(o.status)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {o.status === 'PENDING' && (
+                            <button onClick={() => setReceiveTarget(o)}
+                              className="px-2 py-1 text-xs font-bold bg-green-600 text-white rounded hover:bg-green-700 transition-colors">
+                              Receive
+                            </button>
+                          )}
+                          {o.status === 'PENDING' && (
+                            <button onClick={() => setDeleteTarget(o)}
+                              className="p-1.5 hover:bg-error-container rounded transition-colors">
+                              <span className="material-symbols-outlined text-[18px] text-error">cancel</span>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+
+            {totalPages > 1 && (
+              <div className="px-4 py-3 bg-surface-container-low border-t border-outline-variant/20 flex items-center justify-between">
+                <span className="text-label-sm text-on-surface-variant">
+                  Showing {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, orders.length)} of {orders.length}
+                </span>
+                <div className="flex gap-1">
+                  <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+                    className="px-3 py-1 border border-outline-variant bg-white rounded text-label-sm hover:bg-surface-container disabled:opacity-40 transition-colors">Previous</button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                    <button key={n} onClick={() => setPage(n)}
+                      className={`px-3 py-1 border rounded text-label-sm transition-colors ${n === page ? 'bg-primary text-on-primary border-primary font-bold' : 'bg-white border-outline-variant hover:bg-surface-container'}`}>
+                      {n}
+                    </button>
+                  ))}
+                  <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                    className="px-3 py-1 border border-outline-variant bg-white rounded text-label-sm hover:bg-surface-container disabled:opacity-40 transition-colors">Next</button>
+                </div>
+              </div>
+            )}
           </>
         )}
-      </PanelCard>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-[15px]">
-        <div className="bg-white p-[15px] border border-[#EEEEEE] rounded md:col-span-2">
-          <h3 className="font-panel-header text-panel-header mb-3 uppercase flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary">analytics</span>
-            Recent Expenditure Trend
-          </h3>
-          <div className="h-48 w-full flex items-end justify-between gap-3 px-2">
-            {monthlySpend.map((m) => (
-              <div key={m.label} className="flex-1 flex flex-col items-center gap-1 group">
-                <span className="text-[10px] text-secondary opacity-0 group-hover:opacity-100 transition-opacity">
-                  KES {Math.round(m.total).toLocaleString()}
-                </span>
-                <div
-                  className="w-full bg-primary/70 hover:bg-primary transition-colors rounded-t"
-                  style={{ height: `${m.pct}%`, minHeight: "4px" }}
-                />
-                <span className="text-[10px] text-secondary/60">{m.label.toUpperCase()}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="bg-white p-[15px] border border-[#EEEEEE] rounded">
-          <h3 className="font-panel-header text-panel-header mb-3 uppercase flex items-center gap-2 text-on-surface">
-            <span className="material-symbols-outlined text-primary">quick_reference_all</span>
-            Quick Supplier Contact
-          </h3>
-          <div className="space-y-3">
-            {suppliers.slice(0, 3).map((s) => (
-              <div key={s.id} className="flex items-center justify-between group cursor-pointer hover:bg-surface transition-colors p-1 rounded">
-                <div className="flex items-center gap-2">
-                  <Avatar initials={s.name?.[0]?.toUpperCase() ?? "?"} bgColor={colorFor(s.name).bg} textColor={colorFor(s.name).text} />
-                  <div>
-                    <p className="text-body-semibold text-on-surface">{s.name}</p>
-                    <p className="text-[11px] text-secondary">{s.email || s.phone || "—"}</p>
-                  </div>
-                </div>
-                <span className="material-symbols-outlined text-secondary opacity-0 group-hover:opacity-100 transition-opacity">
-                  call
-                </span>
-              </div>
-            ))}
-            {suppliers.length === 0 && !loading && (
-              <p className="text-label-sm text-secondary">No suppliers registered yet.</p>
-            )}
-          </div>
-        </div>
       </div>
+
+      <ConfirmModal
+        open={!!receiveTarget}
+        title="Mark as Received"
+        message={`Confirm that purchase order #${receiveTarget?.id} from ${receiveTarget?.supplierName} has been received and stock has been updated.`}
+        confirmLabel="Mark Received"
+        onConfirm={handleReceive}
+        onCancel={() => setReceiveTarget(null)}
+        loading={receiving}
+      />
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Cancel Order"
+        message={`Purchase order #${deleteTarget?.id} will be permanently cancelled and removed.`}
+        confirmLabel="Cancel Order"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+        loading={deleting}
+      />
     </div>
   );
 }
