@@ -48,10 +48,11 @@ async function request<T>(
     throw new ApiError(message, res.status);
   }
 
-  // 204 No Content
-  if (res.status === 204) return undefined as T;
+  // No content to parse — covers 204, and 200s with an empty body (e.g. void DELETE endpoints)
+  const text = await res.text();
+  if (!text) return undefined as T;
 
-  return res.json() as Promise<T>;
+  return JSON.parse(text) as T;
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
